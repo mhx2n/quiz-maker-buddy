@@ -498,10 +498,8 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
     newQuestions = finalizeQuestions(newQuestions);
 
     if (newQuestions.length === 0) {
-      return res.json({
-        addedCount: 0,
-        warning: "AI couldn't generate new questions"
-      });
+      res.json({ addedCount: 0, warning: "AI couldn't generate new questions" });
+      return;
     }
 
     const merged = finalizeQuestions([...existingQuestions, ...newQuestions]);
