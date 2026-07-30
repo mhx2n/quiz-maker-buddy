@@ -257,7 +257,7 @@ export function reportClientError(payload: {
   extra?: Record<string, unknown>;
 }) {
   try {
-    void fetch("/api/client-errors", {
+    void fetch(apiUrl("/api/client-errors"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
