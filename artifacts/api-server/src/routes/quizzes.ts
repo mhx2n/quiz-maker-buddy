@@ -308,14 +308,20 @@ router.get("/quizzes/stats", async (req, res) => {
 });
 
 router.post("/quizzes", async (req, res) => {
-  const parsed = GenerateQuizBody.safeParse(req.body);
+  // Unlimited-style generation: the shared schema caps at 50, so the real
+  // requested amount is read from the raw body and produced in batches.
+  const rawCount = Number((req.body as Record<string, unknown>)?.questionCount ?? 5);
+  const requestedCount = Math.max(1, Math.min(1000, Number.isFinite(rawCount) ? Math.round(rawCount) : 5));
+  const parsed = GenerateQuizBody.safeParse({ ...req.body, questionCount: Math.min(50, requestedCount) });
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request: " + parsed.error.message });
     return;
   }
 
-  const { content = "", title, imageBase64, questionCount = 5, language = "Bengali" } = parsed.data;
+  const { content = "", title, imageBase64, language = "Bengali" } = parsed.data;
+  const questionCount = requestedCount;
   const category = (req.body as Record<string, string>).category ?? "general";
+
 
   if (!content.trim() && !imageBase64) {
     res.status(400).json({ error: "Please provide text content or an image." });
