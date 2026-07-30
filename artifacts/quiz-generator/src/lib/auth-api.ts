@@ -1,4 +1,11 @@
+import { apiUrl, API_BASE } from "./api-base";
+
+/** Shown when the Express API server cannot be reached (not deployed / not running). */
+export const API_UNREACHABLE =
+  "API server is not reachable. Start the backend locally, or set VITE_API_URL to your deployed API URL.";
+
 export type AuthUser = {
+
   id: number;
   email: string;
   name: string;
