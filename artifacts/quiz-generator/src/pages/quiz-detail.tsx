@@ -334,8 +334,8 @@ export default function QuizDetail() {
         setPostProgress(100);
       }
 
-      await fetch(`/api/quizzes/${numId}/mark-posted`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channelId }),
+      await fetch(apiUrl(`/api/quizzes/${numId}/mark-posted`), {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ channelId }),
       });
 
       queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(numId) });
