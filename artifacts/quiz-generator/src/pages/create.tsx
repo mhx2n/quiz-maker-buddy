@@ -49,7 +49,7 @@ export default function CreateQuiz() {
 
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [questionCount, setQuestionCount] = useState(10);
+  const [questionCount, setQuestionCount] = useState(30);
   const [language, setLanguage] = useState("Bengali");
   const [category, setCategory] = useState("general");
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -343,12 +343,6 @@ export default function CreateQuiz() {
                 />
               </div>
               <Slider min={1} max={100} step={1} value={[questionCount]} onValueChange={([v]) => setQuestionCount(v)} className="w-full" />
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>1</span>
-                <span>25</span>
-                <span>50</span>
-                <span>100</span>
-              </div>
               {questionCount > 25 && (
                 <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-2.5 py-1.5">
                   ⏳ {questionCount} প্রশ্নের জন্য batch-এ generate হবে — একটু বেশি সময় লাগতে পারে।
