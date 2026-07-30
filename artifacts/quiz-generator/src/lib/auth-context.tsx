@@ -7,7 +7,8 @@ type AuthContextValue = {
   loading: boolean;
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name?: string) => Promise<void>;
+  register: (email: string, password: string, name?: string, accessCode?: string) => Promise<void>;
+  adminLogin: (email: string, password: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -54,8 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(res.token);
       setUser(res.user);
     },
-    register: async (email, password, name) => {
-      const res = await authApi.register({ email, password, name });
+    adminLogin: async (email, password) => {
+      const res = await authApi.adminLogin({ email, password });
+      setToken(res.token);
+      setUser(res.user);
+    },
+    register: async (email, password, name, accessCode) => {
+      const res = await authApi.register({ email, password, name, accessCode });
       setToken(res.token);
       setUser(res.user);
     },
