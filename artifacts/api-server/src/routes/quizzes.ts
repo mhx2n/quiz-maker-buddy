@@ -16,6 +16,7 @@ import {
 import { aiClient as openai, AI_MODEL, AI_SUPPORTS_VISION, type AIMessage } from "../lib/ai";
 import { getSettings } from "../lib/settings";
 import { telegramCall, reportError } from "../lib/notify";
+import { prettyMath } from "../lib/math-text";
 
 const router = Router();
 
@@ -103,12 +104,12 @@ function sanitizeQuestion(q: QuizQuestion): QuizQuestion | null {
 
   if (hasLatexNoise(originalJoined)) return null;
 
-  const question = clip(plainTextify(normalized.question), MAX_QUESTION);
-  const options = normalized.options.map((o) => clip(plainTextify(o), MAX_OPTION));
+  const question = clip(prettyMath(plainTextify(normalized.question)), MAX_QUESTION);
+  const options = normalized.options.map((o) => clip(prettyMath(plainTextify(o)), MAX_OPTION));
   if (!question || options.some((o) => !o)) return null;
 
   const explanation = normalized.explanation
-    ? clip(plainTextify(normalized.explanation), MAX_EXPLANATION)
+    ? clip(prettyMath(plainTextify(normalized.explanation)), MAX_EXPLANATION)
     : undefined;
 
   return {
@@ -239,10 +240,12 @@ STRICT RULES:
 10. Keep the correct answer factually accurate after randomization
 11. Output ONLY a valid JSON array — no markdown, no extra text, no comments
 12. Do NOT use LaTeX, TeX, Markdown math, or dollar signs.
-13. Write all formulas in plain text only, like x^2, sqrt(x), pi, dx/dy.
+13. Write all formulas in plain text only, like x^2, H_2O, sqrt(x), pi, dx/dy. Use ^ for powers and _ for subscripts so they can be rendered properly.
 14. Every question must be directly answerable from the provided content.
 15. If the answer is uncertain, do not generate that question.
-16. LENGTH LIMITS (hard): question <= ${MAX_QUESTION} characters, each option <= ${MAX_OPTION} characters, explanation <= ${MAX_EXPLANATION} characters. Never exceed them.
+16. Follow the Bangladesh NCTB / board / admission standard exactly: terminology, units (SI), spelling and difficulty must match real BD exam papers.
+17. Keep every question self-contained and unambiguous — no "উপরের কোনটিই নয়" style filler options.
+18. LENGTH LIMITS (hard): question <= ${MAX_QUESTION} characters, each option <= ${MAX_OPTION} characters, explanation <= ${MAX_EXPLANATION} characters. Never exceed them.
 
 Return format:
 [{"question":"...","options":["A text","B text","C text","D text"],"correctOptionIndex":0,"explanation":"..."}]
