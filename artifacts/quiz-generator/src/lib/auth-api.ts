@@ -67,8 +67,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const message =
-      (data && typeof data === "object" && "error" in data && String((data as { error: unknown }).error)) ||
-      `Request failed (${res.status})`;
+      data && typeof data === "object" && "error" in data
+        ? String((data as { error: unknown }).error)
+        : `Request failed (${res.status})`;
     throw new Error(message);
   }
 
