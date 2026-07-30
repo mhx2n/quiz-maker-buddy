@@ -60,6 +60,18 @@ export default function CreateQuiz() {
 
   const generateQuiz = useGenerateQuiz();
 
+  // Free hosting puts the API to sleep; wake it up while the user is typing so
+  // the first generate request does not die with a network error.
+  useEffect(() => {
+    const ping = () => {
+      fetch(apiUrl("/api/health"), { cache: "no-store" }).catch(() => {});
+    };
+    ping();
+    const timer = setInterval(ping, 4 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+
   const compressImage = useCallback((file: File): Promise<{ dataUrl: string; base64: string }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
