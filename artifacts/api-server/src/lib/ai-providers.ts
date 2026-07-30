@@ -107,7 +107,9 @@ async function callOpenAiCompatible(
         model,
         messages,
         temperature: params.temperature ?? 0.5,
-        max_tokens: Math.min(params.max_completion_tokens ?? 8000, 16000),
+        // Most providers (Mistral, Groq, DeepSeek…) reject very large max_tokens
+        // with a 400, so keep it within a range every provider accepts.
+        max_tokens: Math.min(params.max_completion_tokens ?? 4096, 8192),
       }),
       signal: controller.signal,
     });

@@ -229,7 +229,7 @@ ${existingCtx}`,
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 16000,
+    max_completion_tokens: 6000,
     temperature: 0.5,
     messages: callMessages,
   });
@@ -247,7 +247,7 @@ ${existingCtx}`,
     // Retry once with a tighter, cheaper request before giving up.
     const retryResponse = await openai.chat.completions.create({
       model: AI_MODEL,
-      max_completion_tokens: 8000,
+      max_completion_tokens: 4000,
       temperature: 0.3,
       messages: callMessages,
     });
@@ -429,8 +429,13 @@ router.post("/quizzes", async (req, res) => {
     }
 
     if (message.includes("All AI providers exhausted") || message.includes("rate-limited")) {
+      // Include the real provider response so the admin can see WHY it failed
+      // (bad model name, invalid key, token limit…) instead of a generic message.
+      const detail = message.replace(/^All AI providers exhausted[^.]*\.\s*/i, "").slice(0, 400);
       res.status(503).json({
-        error: "All AI keys are exhausted or rate-limited right now. Please try again later.",
+        error: detail
+          ? `AI provider error → ${detail}`
+          : "All AI keys are exhausted or rate-limited right now. Please try again later.",
       });
       return;
     }

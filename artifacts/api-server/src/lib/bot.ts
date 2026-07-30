@@ -164,12 +164,27 @@ async function poll() {
   if (running) return;
   running = true;
 
+  let lastToken = "";
+
   while (!stopped) {
     try {
       const { errorBotToken } = await getSettings();
       if (!errorBotToken) {
         await new Promise((r) => setTimeout(r, 10000));
         continue;
+      }
+
+      // A leftover webhook silently blocks getUpdates — clear it once per token.
+      if (errorBotToken !== lastToken) {
+        lastToken = errorBotToken;
+        const me = await telegramCall<{ username?: string }>(errorBotToken, "getMe", {});
+        if (!me.ok) {
+          logger.error({ detail: me.description }, "Telegram bot token rejected");
+          await new Promise((r) => setTimeout(r, 15000));
+          continue;
+        }
+        await telegramCall(errorBotToken, "deleteWebhook", { drop_pending_updates: false });
+        logger.info({ bot: me.result?.username }, "Telegram bot connected");
       }
 
       const res = await telegramCall<TgUpdate[]>(
@@ -180,9 +195,11 @@ async function poll() {
       );
 
       if (!res.ok || !res.result) {
+        if (res.description) logger.warn({ detail: res.description }, "getUpdates failed");
         await new Promise((r) => setTimeout(r, 5000));
         continue;
       }
+
 
       for (const update of res.result) {
         offset = Math.max(offset, update.update_id + 1);
