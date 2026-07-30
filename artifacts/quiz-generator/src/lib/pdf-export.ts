@@ -143,7 +143,7 @@ function questionHTML(q: QuizQuestion, index: number, showAnswer: boolean, showE
   const ans = showAnswer
     ? `<div class="ans">সঠিক উত্তর: ${BN_LETTERS[q.correctOptionIndex] ?? "?"}) ${fmt(correct)}</div>`
     : "";
-  const expl = showExpl && q.explanation ? `<div class="expl">💡 ${fmt(q.explanation)}</div>` : "";
+  const expl = showExpl && q.explanation ? `<div class="expl"><b>ব্যাখ্যা:</b> ${fmt(q.explanation)}</div>` : "";
 
   return (
     `<div class="qb"><div class="qh"><span class="qn">${index + 1}.</span>` +
@@ -173,8 +173,8 @@ function pageShell(
     `<div class="hdr"><span>${esc(opts.headerLeft || "Quiz Generator")}</span><span>${esc(opts.headerRight || "")}</span></div>` +
     (isFirst
       ? `<div class="ttlwrap"><div class="ttl">${esc(title)}</div>` +
-        `<div class="meta"><span>📝 ${quiz.questions.length} Questions</span><span>📅 ${date}</span>` +
-        (quiz.telegramChannel ? `<span>📢 ${esc(quiz.telegramChannel)}</span>` : "") +
+        `<div class="meta"><span>${quiz.questions.length} Questions</span><span>${date}</span>` +
+        (quiz.telegramChannel ? `<span>${esc(quiz.telegramChannel)}</span>` : "") +
         `</div></div>`
       : "") +
     `<div class="rule"></div>` +
