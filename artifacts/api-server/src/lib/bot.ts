@@ -9,7 +9,31 @@ import { logger } from "./logger";
 type TgUser = { id: number; first_name?: string; username?: string };
 type TgChat = { id: number; type: string; title?: string };
 type TgMessage = { message_id: number; from?: TgUser; chat: TgChat; text?: string };
-type TgUpdate = { update_id: number; message?: TgMessage; channel_post?: TgMessage };
+type TgCallback = {
+  id: string;
+  from: TgUser;
+  data?: string;
+  message?: { message_id: number; chat: TgChat };
+};
+type TgUpdate = {
+  update_id: number;
+  message?: TgMessage;
+  channel_post?: TgMessage;
+  callback_query?: TgCallback;
+};
+
+/** Access-code requests waiting for the owner's approval. */
+type PendingRequest = {
+  id: string;
+  userId: number;
+  chatId: number;
+  name: string;
+  username: string;
+  at: number;
+};
+const pendingRequests = new Map<string, PendingRequest>();
+/** One open request per Telegram user, so nobody can spam the owner. */
+const requestByUser = new Map<number, string>();
 
 let offset = 0;
 let running = false;
@@ -22,6 +46,11 @@ async function isOwner(userId?: number): Promise<boolean> {
   // No owner configured yet → the bot only answers /id so the owner can bootstrap.
   if (!ids.length) return false;
   return ids.includes(String(userId));
+}
+
+async function ownerIds(): Promise<string[]> {
+  const { ownerTelegramIds } = await getSettings();
+  return ownerTelegramIds.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 async function reply(botToken: string, chatId: number, text: string) {
@@ -66,7 +95,64 @@ async function handleCommand(botToken: string, msg: TgMessage) {
             `/errors — last 5 errors\n` +
             `/backup — run a MongoDB backup now\n` +
             `/test — send a test alert to the private group`
-          : `⚠️ You are not registered as an owner. Ask the admin to add your ID.`),
+          : `/getcode — request a website access code (owner must approve)\n\n` +
+            `অনুমোদনের পর আপনি একটি একবার-ব্যবহারযোগ্য code পাবেন। সেই code দিয়েই ওয়েবসাইটে রেজিস্ট্রেশন করুন।`),
+    );
+    return;
+  }
+
+  if (command === "/getcode" || command === "/request") {
+    if (owner) {
+      await reply(botToken, chatId, "You are an owner — use /newcode to mint a code directly.");
+      return;
+    }
+    const owners = await ownerIds();
+    if (!owners.length) {
+      await reply(botToken, chatId, "⚠️ No owner is configured yet. Please try again later.");
+      return;
+    }
+    const userId = msg.from?.id ?? chatId;
+    const existing = requestByUser.get(userId);
+    if (existing && pendingRequests.has(existing)) {
+      await reply(botToken, chatId, "⏳ আপনার আবেদন ইতিমধ্যে owner-এর কাছে পাঠানো হয়েছে। অনুমোদনের জন্য অপেক্ষা করুন।");
+      return;
+    }
+
+    const req: PendingRequest = {
+      id: `${userId}-${Date.now().toString(36)}`,
+      userId,
+      chatId,
+      name: msg.from?.first_name ?? "Unknown",
+      username: msg.from?.username ? `@${msg.from.username}` : "—",
+      at: Date.now(),
+    };
+    pendingRequests.set(req.id, req);
+    requestByUser.set(userId, req.id);
+
+    const note = args.join(" ").slice(0, 150);
+    for (const oid of owners) {
+      await telegramCall(botToken, "sendMessage", {
+        chat_id: oid,
+        text:
+          `🔐 <b>Access code request</b>\n` +
+          `Name: <b>${req.name}</b>\n` +
+          `Username: ${req.username}\n` +
+          `Telegram ID: <code>${req.userId}</code>\n` +
+          (note ? `Note: ${note}\n` : "") +
+          `\nApprove to generate a one-time code and send it to this user.`,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "✅ Approve", callback_data: `ac:ok:${req.id}` },
+            { text: "🚫 Reject", callback_data: `ac:no:${req.id}` },
+          ]],
+        },
+      });
+    }
+    await reply(
+      botToken,
+      chatId,
+      "📨 আপনার আবেদন owner-এর কাছে পাঠানো হয়েছে।\nঅনুমোদিত হলে এখানেই আপনার একবার-ব্যবহারযোগ্য access code পাঠানো হবে।",
     );
     return;
   }
@@ -160,6 +246,70 @@ async function handleCommand(botToken: string, msg: TgMessage) {
   }
 }
 
+async function handleCallback(botToken: string, cb: TgCallback) {
+  const data = cb.data ?? "";
+  if (!data.startsWith("ac:")) return;
+
+  const answer = async (text: string) => {
+    await telegramCall(botToken, "answerCallbackQuery", { callback_query_id: cb.id, text, show_alert: false });
+  };
+
+  if (!(await isOwner(cb.from.id))) {
+    await answer("Not allowed.");
+    return;
+  }
+
+  const [, action, reqId] = data.split(":");
+  const req = reqId ? pendingRequests.get(reqId) : undefined;
+  if (!req) {
+    await answer("This request is no longer pending.");
+    return;
+  }
+  pendingRequests.delete(req.id);
+  requestByUser.delete(req.userId);
+
+  let resultLine: string;
+  if (action === "ok") {
+    const row = await createAccessCode({
+      note: `telegram:${req.name} ${req.username}`,
+      issuedBy: `telegram:${cb.from.id}`,
+      telegramUserId: String(req.userId),
+      maxUses: 1,
+    });
+    await telegramCall(botToken, "sendMessage", {
+      chat_id: req.chatId,
+      text:
+        `✅ <b>আপনার আবেদন অনুমোদিত হয়েছে</b>\n\n` +
+        `আপনার access code:\n<code>${row.code}</code>\n\n` +
+        `⚠️ এই code শুধু <b>একবার</b> ব্যবহার করা যাবে এবং শুধুমাত্র আপনার জন্য। ` +
+        `রেজিস্ট্রেশনের পর এটি নিষ্ক্রিয় হয়ে যাবে — অন্য কেউ ব্যবহার করতে পারবে না।`,
+      parse_mode: "HTML",
+    });
+    resultLine = `✅ Approved — code <code>${row.code}</code> sent to ${req.name} (${req.userId}).`;
+    await answer("Approved and code sent.");
+  } else {
+    await telegramCall(botToken, "sendMessage", {
+      chat_id: req.chatId,
+      text: "🚫 দুঃখিত, আপনার access code আবেদনটি অনুমোদিত হয়নি।",
+    });
+    resultLine = `🚫 Rejected request from ${req.name} (${req.userId}).`;
+    await answer("Rejected.");
+  }
+
+  if (cb.message) {
+    await telegramCall(botToken, "editMessageReplyMarkup", {
+      chat_id: cb.message.chat.id,
+      message_id: cb.message.message_id,
+      reply_markup: { inline_keyboard: [] },
+    });
+    await telegramCall(botToken, "sendMessage", {
+      chat_id: cb.message.chat.id,
+      text: resultLine,
+      parse_mode: "HTML",
+    });
+  }
+}
+
 async function poll() {
   if (running) return;
   running = true;
@@ -190,7 +340,7 @@ async function poll() {
       const res = await telegramCall<TgUpdate[]>(
         errorBotToken,
         "getUpdates",
-        { offset, timeout: 25, allowed_updates: ["message"] },
+        { offset, timeout: 25, allowed_updates: ["message", "callback_query"] },
         35000,
       );
 
@@ -203,9 +353,13 @@ async function poll() {
 
       for (const update of res.result) {
         offset = Math.max(offset, update.update_id + 1);
-        const msg = update.message;
-        if (!msg?.text) continue;
         try {
+          if (update.callback_query) {
+            await handleCallback(errorBotToken, update.callback_query);
+            continue;
+          }
+          const msg = update.message;
+          if (!msg?.text) continue;
           await handleCommand(errorBotToken, msg);
         } catch (err) {
           logger.warn({ err }, "Bot command failed");
