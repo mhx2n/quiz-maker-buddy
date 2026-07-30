@@ -218,7 +218,7 @@ async function callKey(key: ApiKeyRow, params: ChatParams, timeoutMs: number): P
 // ── Key selection + rotation ───────────────────────────────────────────────
 async function usableKeys(): Promise<ApiKeyRow[]> {
   const now = new Date();
-  return db
+  const ready = await db
     .select()
     .from(apiKeysTable)
     .where(
@@ -227,6 +227,17 @@ async function usableKeys(): Promise<ApiKeyRow[]> {
         or(isNull(apiKeysTable.cooldownUntil), sql`${apiKeysTable.cooldownUntil} <= ${now}`),
       ),
     )
+    .orderBy(asc(apiKeysTable.priority), asc(apiKeysTable.lastUsedAt), asc(apiKeysTable.id));
+
+  if (ready.length > 0) return ready;
+
+  // If every active key is in a short cooldown, still retry them once so a fixed
+  // model/key starts working immediately after deploy instead of showing a vague
+  // "no usable key" message.
+  return db
+    .select()
+    .from(apiKeysTable)
+    .where(eq(apiKeysTable.isActive, true))
     .orderBy(asc(apiKeysTable.priority), asc(apiKeysTable.lastUsedAt), asc(apiKeysTable.id));
 }
 
