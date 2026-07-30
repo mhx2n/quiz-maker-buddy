@@ -77,6 +77,20 @@ function normalizeQuestion(q: QuizQuestion): QuizQuestion | null {
   };
 }
 
+// Telegram poll hard limits: question 300, option 100, explanation 200 chars.
+// We stay safely below them so every generated quiz can always be posted.
+const MAX_QUESTION = 250;
+const MAX_OPTION = 90;
+const MAX_EXPLANATION = 180;
+
+function clip(text: string, max: number): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const stop = Math.max(cut.lastIndexOf("। "), cut.lastIndexOf(". "), cut.lastIndexOf(" "));
+  return (stop > max * 0.6 ? cut.slice(0, stop) : cut).trim().replace(/[,;:।.]+$/, "") + "…";
+}
+
 function sanitizeQuestion(q: QuizQuestion): QuizQuestion | null {
   const normalized = normalizeQuestion(q);
   if (!normalized) return null;
@@ -89,13 +103,22 @@ function sanitizeQuestion(q: QuizQuestion): QuizQuestion | null {
 
   if (hasLatexNoise(originalJoined)) return null;
 
+  const question = clip(plainTextify(normalized.question), MAX_QUESTION);
+  const options = normalized.options.map((o) => clip(plainTextify(o), MAX_OPTION));
+  if (!question || options.some((o) => !o)) return null;
+
+  const explanation = normalized.explanation
+    ? clip(plainTextify(normalized.explanation), MAX_EXPLANATION)
+    : undefined;
+
   return {
-    question: plainTextify(normalized.question),
-    options: normalized.options.map(plainTextify),
+    question,
+    options,
     correctOptionIndex: normalized.correctOptionIndex,
-    explanation: normalized.explanation ? plainTextify(normalized.explanation) : undefined,
+    explanation: explanation || undefined,
   };
 }
+
 
 function cleanQuestionsForStorage(questions: QuizQuestion[]): QuizQuestion[] {
   return questions
@@ -208,9 +231,9 @@ STRICT RULES:
 2. correctOptionIndex is 0-based (0=A, 1=B, 2=C, 3=D) — VERIFY THIS IS CORRECT before outputting
 3. The correct answer MUST be factually/scientifically accurate — double-check numerical answers
 4. All 3 wrong options must be plausible distractors (common misconceptions or close values), NOT random
-5. explanation must clearly explain WHY the correct answer is right and why others are wrong (in ${language})
+5. explanation must be SHORT but effective: 1 sentence, MAXIMUM ${MAX_EXPLANATION} characters (in ${language}). State only the key reason the correct answer is right. No option-by-option breakdown, no repetition of the question.
 6. Questions must test UNDERSTANDING, not just memory
-7. For numerical problems: show the correct calculated value in explanation
+7. For numerical problems: give only the final calculated value in the explanation
 8. NEVER make the correct option obviously different in length/style from wrong options
 9. Randomize the order of options for every question so the correct answer does not stay in the same position repeatedly
 10. Keep the correct answer factually accurate after randomization
@@ -219,6 +242,7 @@ STRICT RULES:
 13. Write all formulas in plain text only, like x^2, sqrt(x), pi, dx/dy.
 14. Every question must be directly answerable from the provided content.
 15. If the answer is uncertain, do not generate that question.
+16. LENGTH LIMITS (hard): question <= ${MAX_QUESTION} characters, each option <= ${MAX_OPTION} characters, explanation <= ${MAX_EXPLANATION} characters. Never exceed them.
 
 Return format:
 [{"question":"...","options":["A text","B text","C text","D text"],"correctOptionIndex":0,"explanation":"..."}]
@@ -227,12 +251,17 @@ ${existingCtx}`,
 
   const callMessages: AIMessage[] = [systemMsg, ...messages];
 
+  // Keep the output budget proportional to the batch so a single call stays
+  // fast enough to finish well inside the provider/hosting timeout.
+  const tokenBudget = Math.min(6000, Math.max(1200, count * 220 + 400));
+
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 6000,
+    max_completion_tokens: tokenBudget,
     temperature: 0.5,
     messages: callMessages,
   });
+
 
   const raw = response.choices[0]?.message?.content ?? "[]";
 
@@ -355,7 +384,7 @@ router.post("/quizzes", async (req, res) => {
 
     const userMessage: AIMessage = { role: "user", content: baseUserContent };
 
-    const BATCH = 20;
+    const BATCH = 10;
     let allQuestions: QuizQuestion[] = [];
 
     if (questionCount <= BATCH) {
@@ -475,7 +504,7 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
 
     const userMessage: AIMessage = { role: "user", content: userText };
 
-    const BATCH = 20;
+    const BATCH = 10;
     let newQuestions: QuizQuestion[] = [];
 
     if (count <= BATCH) {

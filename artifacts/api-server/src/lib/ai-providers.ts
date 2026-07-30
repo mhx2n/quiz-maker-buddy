@@ -256,34 +256,49 @@ async function markSuccess(key: ApiKeyRow) {
 
 const COOLDOWN_QUOTA_MS = 30 * 60 * 1000;
 const COOLDOWN_ERROR_MS = 2 * 60 * 1000;
+const COOLDOWN_TIMEOUT_MS = 15 * 1000;
+
+/** A network abort/timeout is transient — never punish the key for 2 minutes. */
+function isTimeoutError(err: Error): boolean {
+  const msg = `${err.name} ${err.message}`.toLowerCase();
+  return msg.includes("abort") || msg.includes("timeout") || msg.includes("etimedout") || msg.includes("fetch failed");
+}
+
 
 async function markFailure(key: ApiKeyRow, err: Error, quota: boolean) {
+  const timeout = !quota && isTimeoutError(err);
+  const cooldownMs = quota ? COOLDOWN_QUOTA_MS : timeout ? COOLDOWN_TIMEOUT_MS : COOLDOWN_ERROR_MS;
+
   await db
     .update(apiKeysTable)
     .set({
-      status: quota ? "exhausted" : "error",
+      status: quota ? "exhausted" : timeout ? "slow" : "error",
       lastError: err.message.slice(0, 500),
       lastUsedAt: new Date(),
       failCount: sql`${apiKeysTable.failCount} + 1`,
-      cooldownUntil: new Date(Date.now() + (quota ? COOLDOWN_QUOTA_MS : COOLDOWN_ERROR_MS)),
+      cooldownUntil: new Date(Date.now() + cooldownMs),
     })
     .where(eq(apiKeysTable.id, key.id));
 
   await reportError({
     source: "ai",
-    level: quota ? "warn" : "error",
+    level: quota || timeout ? "warn" : "error",
     message: quota
       ? `API limit reached — ${key.provider}${key.label ? ` (${key.label})` : ""}`
-      : `AI provider failed — ${key.provider}${key.label ? ` (${key.label})` : ""}`,
+      : timeout
+        ? `AI provider timed out — ${key.provider}${key.label ? ` (${key.label})` : ""}`
+        : `AI provider failed — ${key.provider}${key.label ? ` (${key.label})` : ""}`,
     context: {
       provider: key.provider,
       keyId: key.id,
       label: key.label,
       detail: err.message.slice(0, 500),
-      cooldownMinutes: quota ? 30 : 2,
+      cooldownSeconds: Math.round(cooldownMs / 1000),
     },
   });
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Rotates through every stored key until one answers. */
 export async function chatComplete(params: ChatParams): Promise<ChatResult> {
@@ -299,23 +314,38 @@ export async function chatComplete(params: ChatParams): Promise<ChatResult> {
     throw new Error("All AI providers exhausted: add an API key from the admin panel.");
   }
 
+  const timeoutMs = Math.max(settings.aiTimeoutMs, 60000);
   const errors: string[] = [];
+
   for (const key of keys) {
-    try {
-      const text = await callKey(key, params, settings.aiTimeoutMs);
-      await markSuccess(key);
-      return { choices: [{ message: { content: text } }], provider: key.provider };
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      const quota = Boolean((error as Error & { quota?: boolean }).quota);
-      logger.warn({ provider: key.provider, keyId: key.id, err: error.message }, "AI key failed");
-      errors.push(`${key.provider}#${key.id}: ${error.message}`);
-      await markFailure(key, error, quota).catch(() => {});
+    // Each key gets two shots: a timeout or a transient network blip should not
+    // knock out the only configured provider.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const text = await callKey(key, params, attempt === 0 ? timeoutMs : Math.round(timeoutMs * 1.5));
+        await markSuccess(key);
+        return { choices: [{ message: { content: text } }], provider: key.provider };
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        const quota = Boolean((error as Error & { quota?: boolean }).quota);
+        const retryable = !quota && isTimeoutError(error);
+        logger.warn({ provider: key.provider, keyId: key.id, attempt, err: error.message }, "AI key failed");
+
+        if (retryable && attempt === 0) {
+          await sleep(1000);
+          continue;
+        }
+
+        errors.push(`${key.provider}#${key.id}: ${error.message}`);
+        await markFailure(key, error, quota).catch(() => {});
+        break;
+      }
     }
   }
 
   throw new Error(`All AI providers exhausted or rate-limited. ${errors.slice(0, 3).join(" | ")}`);
 }
+
 
 /** Single-key smoke test used by the admin panel "Test" button. */
 export async function testKey(key: ApiKeyRow): Promise<{ ok: boolean; detail: string }> {

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useGenerateQuiz } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,8 @@ import {
   AlertCircle, FlaskConical, Stethoscope, GraduationCap, BookOpen, Atom, Globe,
 } from "lucide-react";
 import { extractTextFromImage } from "@/lib/ocr";
+import { apiUrl } from "@/lib/api-base";
+
 
 type OCRState = "idle" | "loading" | "done" | "error";
 
@@ -57,6 +59,18 @@ export default function CreateQuiz() {
   const [ocrConfidence, setOcrConfidence] = useState(0);
 
   const generateQuiz = useGenerateQuiz();
+
+  // Free hosting puts the API to sleep; wake it up while the user is typing so
+  // the first generate request does not die with a network error.
+  useEffect(() => {
+    const ping = () => {
+      fetch(apiUrl("/api/health"), { cache: "no-store" }).catch(() => {});
+    };
+    ping();
+    const timer = setInterval(ping, 4 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
 
   const compressImage = useCallback((file: File): Promise<{ dataUrl: string; base64: string }> => {
     return new Promise((resolve, reject) => {
@@ -167,9 +181,17 @@ export default function CreateQuiz() {
           setLocation(`/quiz/${quiz.id}`);
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Could not generate quiz. Please try again.";
-          toast({ title: "Generation failed", description: msg.replace(/^HTTP \d+ [^:]+: /, ""), variant: "destructive" });
+          const raw = err instanceof Error ? err.message : "Could not generate quiz. Please try again.";
+          const isNetwork = /NetworkError|Failed to fetch|network|load failed/i.test(raw);
+          toast({
+            title: "Generation failed",
+            description: isNetwork
+              ? "সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে (free hosting ঘুমিয়ে ছিল বা রিকোয়েস্ট বেশি সময় নিয়েছে)। ১০ সেকেন্ড পর আবার Generate চাপুন — প্রশ্নসংখ্যা কম রাখলে দ্রুত হবে।"
+              : raw.replace(/^HTTP \d+ [^:]+: /, ""),
+            variant: "destructive",
+          });
         },
+
       }
     );
   };
