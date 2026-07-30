@@ -100,7 +100,7 @@ function styleSheet(t: ThemeVars, fs: number, wmOpacity: number): string {
 .pdfpage{width:${PAGE_W}px;height:${PAGE_H}px;background:#fff;position:relative;overflow:hidden;
   font-family:'Noto Sans Bengali','Noto Sans','SolaimanLipi','Kalpurush',Arial,sans-serif;
   color:#15201f;padding:${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px}
-.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-28deg);font-size:82px;
+.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-28deg);font-size:58px;
   font-weight:800;color:rgba(120,120,120,${wmOpacity});white-space:nowrap;letter-spacing:10px;z-index:0;
   font-family:Arial,sans-serif}
 .layer{position:relative;z-index:1;height:100%;display:flex;flex-direction:column}
@@ -240,7 +240,8 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
     let col = columns[colIndex]!;
     col.appendChild(block);
 
-    if (col.scrollHeight > limit && col.children.length > 1) {
+    const used = Math.max(col.scrollHeight, col.offsetHeight);
+    if (used > limit - 4 && col.children.length > 1) {
       col.removeChild(block);
       if (colIndex + 1 < columns.length) {
         colIndex++;
