@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,12 +11,14 @@ import QuizDetail from "@/pages/quiz-detail";
 import History from "@/pages/history";
 import Login from "@/pages/login";
 import Admin from "@/pages/admin";
+import SecureAdminLogin from "@/pages/secure-admin-login";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
 
 function Router() {
   const { user, loading } = useAuth();
+  const [location] = useLocation();
 
   if (loading) {
     return (
@@ -25,6 +27,9 @@ function Router() {
       </div>
     );
   }
+
+  // Dedicated administrator entrance, always reachable.
+  if (location === "/secure-admin-login") return <SecureAdminLogin />;
 
   if (!user) return <Login />;
 
