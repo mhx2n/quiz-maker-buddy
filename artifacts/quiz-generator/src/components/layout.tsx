@@ -93,14 +93,14 @@ export function Layout({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-8 pb-24 md:pb-8">
           <div className="max-w-6xl mx-auto h-full">
             {children}
           </div>
         </div>
 
         {/* Mobile Bottom Navigation */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t z-50">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t z-50 pb-[env(safe-area-inset-bottom)]">
           <div className="flex items-stretch">
             {navItems.map((item) => {
               const Icon = item.icon;

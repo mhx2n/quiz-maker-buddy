@@ -173,3 +173,38 @@
     width: 100%;
   }
 }
+
+
+/* ---- Global responsiveness guards ---------------------------------- */
+html, body, #root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Long formulas, URLs and Bengali words must wrap instead of widening the page */
+h1, h2, h3, h4, p, span, li, td, th, label, button {
+  overflow-wrap: anywhere;
+}
+
+/* Tables never force horizontal page scroll — they scroll inside their card */
+table {
+  width: 100%;
+}
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Images and media stay inside their container on every screen size */
+img, svg, video, canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Dialogs must fit small phones */
+@media (max-width: 640px) {
+  [role="dialog"] {
+    max-width: calc(100vw - 1.5rem);
+  }
+}
