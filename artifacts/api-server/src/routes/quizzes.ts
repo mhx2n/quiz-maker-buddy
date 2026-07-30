@@ -384,7 +384,7 @@ router.post("/quizzes", async (req, res) => {
 
     const userMessage: AIMessage = { role: "user", content: baseUserContent };
 
-    const BATCH = 20;
+    const BATCH = 10;
     let allQuestions: QuizQuestion[] = [];
 
     if (questionCount <= BATCH) {
@@ -504,7 +504,7 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
 
     const userMessage: AIMessage = { role: "user", content: userText };
 
-    const BATCH = 20;
+    const BATCH = 10;
     let newQuestions: QuizQuestion[] = [];
 
     if (count <= BATCH) {
