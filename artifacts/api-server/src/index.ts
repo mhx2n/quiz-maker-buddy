@@ -24,6 +24,21 @@ async function ensureSchema() {
         updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id             SERIAL PRIMARY KEY,
+        email          TEXT NOT NULL UNIQUE,
+        name           TEXT NOT NULL DEFAULT '',
+        password_hash  TEXT NOT NULL,
+        role           TEXT NOT NULL DEFAULT 'user',
+        is_blocked     BOOLEAN NOT NULL DEFAULT FALSE,
+        quiz_limit     INTEGER NOT NULL DEFAULT 0,
+        created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+        last_login_at  TIMESTAMP
+      );
+    `);
+    await client.query(`ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS user_id INTEGER;`);
+    await client.query(`CREATE INDEX IF NOT EXISTS quizzes_user_id_idx ON quizzes (user_id);`);
     logger.info("DB schema ready");
   } finally {
     client.release();
