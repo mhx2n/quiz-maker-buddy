@@ -229,7 +229,7 @@ ${existingCtx}`,
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 16000,
+    max_completion_tokens: 6000,
     temperature: 0.5,
     messages: callMessages,
   });
@@ -247,7 +247,7 @@ ${existingCtx}`,
     // Retry once with a tighter, cheaper request before giving up.
     const retryResponse = await openai.chat.completions.create({
       model: AI_MODEL,
-      max_completion_tokens: 8000,
+      max_completion_tokens: 4000,
       temperature: 0.3,
       messages: callMessages,
     });
