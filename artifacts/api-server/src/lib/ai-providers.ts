@@ -300,20 +300,10 @@ async function markFailure(key: ApiKeyRow, err: Error, quota: boolean) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Rotates through every stored key until one answers. */
+/** Rotates through every stored key, then falls back to keyless free providers. */
 export async function chatComplete(params: ChatParams): Promise<ChatResult> {
   const settings = await getSettings();
   const keys = await usableKeys();
-
-  if (!keys.length) {
-    await reportError({
-      source: "ai",
-      level: "error",
-      message: "No usable AI API key — every key is missing, disabled, or in cooldown.",
-    });
-    throw new Error("All AI providers exhausted: add an API key from the admin panel.");
-  }
-
   const timeoutMs = Math.max(settings.aiTimeoutMs, 60000);
   const errors: string[] = [];
 
@@ -343,8 +333,33 @@ export async function chatComplete(params: ChatParams): Promise<ChatResult> {
     }
   }
 
-  throw new Error(`All AI providers exhausted or rate-limited. ${errors.slice(0, 3).join(" | ")}`);
+  // Every stored key is missing/exhausted/failing → try the keyless providers so
+  // quiz generation keeps working instead of surfacing a 503 to the user.
+  const free = await freeFallbackChat(params, timeoutMs);
+  if (free) {
+    await reportError({
+      source: "ai",
+      level: "warn",
+      message: `Used keyless fallback provider (${free.provider}) — stored API keys unavailable.`,
+      context: { detail: errors.slice(0, 2).join(" | ") || "no usable key" },
+    });
+    return { choices: [{ message: { content: free.text } }], provider: free.provider };
+  }
+
+  await reportError({
+    source: "ai",
+    level: "error",
+    message: keys.length
+      ? "All AI providers and keyless fallbacks failed."
+      : "No usable AI API key and every keyless fallback failed.",
+    context: { detail: errors.slice(0, 3).join(" | ") },
+  });
+
+  throw new Error(
+    `All AI providers exhausted or rate-limited (free fallbacks also failed). ${errors.slice(0, 3).join(" | ")}`,
+  );
 }
+
 
 
 /** Single-key smoke test used by the admin panel "Test" button. */
