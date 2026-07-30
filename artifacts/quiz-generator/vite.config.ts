@@ -13,6 +13,32 @@ const basePath = process.env.BASE_PATH ?? "/";
 
 const isReplit = Boolean(process.env.REPL_ID);
 
+// Dev-only: forward /api to the Express API server so the frontend and backend
+// share one origin during development. Override with API_PROXY_TARGET.
+// In production set VITE_API_URL instead (see src/lib/api-base.ts).
+const apiTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:10000";
+const apiProxy: Record<string, ProxyOptions> = {
+  "/api": {
+    target: apiTarget,
+    changeOrigin: true,
+    // Never crash the dev server when the API is not running.
+    configure: (proxy) => {
+      proxy.on("error", (_err, _req, res) => {
+        const socket = res as unknown as { writableEnded?: boolean; writeHead?: Function; end?: Function };
+        if (socket.writableEnded || typeof socket.writeHead !== "function") return;
+        socket.writeHead(503, { "Content-Type": "application/json" });
+        socket.end!(
+          JSON.stringify({
+            error: `API server not running at ${apiTarget}. Start it with "pnpm run dev:api" (needs DATABASE_URL), or set VITE_API_URL to a deployed API.`,
+          }),
+        );
+      });
+    },
+  },
+};
+
+
+
 export default defineConfig({
   base: basePath,
   plugins: [
