@@ -233,26 +233,38 @@ export default function QuizDetail() {
     });
   };
 
-  // ── Post to Telegram ──────────────────────────────────────────────────────
-  const handlePost = async () => {
+  // ── Post to Telegram (resumable) ──────────────────────────────────────────
+  const handlePost = async (opts?: { resume?: boolean }) => {
     if (!botToken.trim() || !channelId.trim()) {
       toast({ title: "Bot token এবং Channel ID দরকার", variant: "destructive" }); return;
     }
     const questions = quiz?.questions as QuizQuestion[];
     if (!questions?.length) return;
 
+    const resuming = !!opts?.resume && resumeState?.channelId === channelId;
+    const startIndex = resuming ? Math.min(resumeState!.nextIndex, questions.length) : 0;
+
     // Save config for this channel
     const cfg = currentConfig();
     saveChannelConfig(cfg);
     setSavedChannels(loadAllChannels());
 
-    setPostProgress(0); setPostingStatus("শুরু হচ্ছে...");
+    setPostProgress(1); setPostingStatus(resuming ? `প্রশ্ন ${startIndex + 1} থেকে আবার শুরু...` : "শুরু হচ্ছে...");
+
+    // Fail-safe: remember where we stopped so the user can resume later.
+    const remember = (nextIndex: number, introMsgId: number | null, error?: string) => {
+      if (nextIndex >= questions.length) { clearResume(numId); setResumeState(null); return; }
+      const st: ResumeState = { channelId, nextIndex, introMsgId, total: questions.length, error, at: Date.now() };
+      saveResume(numId, st);
+      setResumeState(st);
+    };
+
+    let introMsgId: number | null = resuming ? (resumeState?.introMsgId ?? null) : null;
+    let posted = startIndex;
 
     try {
-      let introMsgId: number | null = null;
-
-      // ── Step 1: Intro message ──────────────────────────────────────────
-      if (enableIntro && (introText.trim() || introPhotoFile)) {
+      // ── Step 1: Intro message (skipped when resuming) ──────────────────
+      if (!resuming && enableIntro && (introText.trim() || introPhotoFile)) {
         setPostingStatus("Intro message পাঠানো হচ্ছে...");
         const caption = introText.replace(/\{N\}/g, String(questions.length)).replace(/\{TOTAL\}/g, String(questions.length));
 
@@ -302,17 +314,16 @@ export default function QuizDetail() {
       }
 
       // ── Step 3: Post polls ─────────────────────────────────────────────
-      let posted = 0;
       const totalSteps = questions.length + (sendScore && introMsgId ? 1 : 0);
 
-      for (let i = 0; i < questions.length; i++) {
+      for (let i = startIndex; i < questions.length; i++) {
         setPostingStatus(`প্রশ্ন ${i + 1}/${questions.length} পাঠানো হচ্ছে...`);
         const q = questions[i];
         const qBody = formatMathText(q.question);
         const qText = questionPrefix ? `${questionPrefix}\n${qBody}` : qBody;
         const explBody = q.explanation ? formatMathText(q.explanation) : "";
-        // One blank line before the suffix so it never sticks to the explanation.
-        const expl = explBody ? (explanationSuffix ? `${explBody}\n\n${explanationSuffix}` : explBody) : undefined;
+        // Two blank lines before the suffix so it clearly stands apart.
+        const expl = explBody ? (explanationSuffix ? `${explBody}\n\n\n${explanationSuffix}` : explBody) : undefined;
 
         const payload: Record<string, unknown> = {
           chat_id: channelId,
@@ -325,13 +336,25 @@ export default function QuizDetail() {
         };
         if (introMsgId) payload.reply_to_message_id = introMsgId;
 
-        const data = await tgApi(botToken, "sendPoll", payload);
+        // One automatic retry keeps a single flaky request from killing the run.
+        let data = await tgApi(botToken, "sendPoll", payload).catch(() => ({ ok: false, description: "network" }));
         if (!data.ok) {
-          toast({ title: `প্রশ্ন ${i + 1} পাঠাতে ব্যর্থ`, description: data.description, variant: "destructive" });
-          setPostProgress(0); setPostingStatus(""); return;
+          await new Promise(r => setTimeout(r, 2000));
+          data = await tgApi(botToken, "sendPoll", payload).catch(() => ({ ok: false, description: "network" }));
         }
-        posted++;
-        setPostProgress(Math.round((posted / totalSteps) * 100));
+        if (!data.ok) {
+          remember(i, introMsgId, data.description);
+          toast({
+            title: `প্রশ্ন ${i + 1} পাঠাতে ব্যর্থ`,
+            description: `${data.description ?? "Unknown error"} — ${i} টি পোস্ট হয়েছে, ${i + 1} নম্বর থেকে আবার শুরু করা যাবে।`,
+            variant: "destructive",
+          });
+          setPostProgress(0); setPostingStatus("");
+          return;
+        }
+        posted = i + 1;
+        remember(posted, introMsgId);
+        setPostProgress(Math.max(1, Math.round((posted / totalSteps) * 100)));
 
         if (i < questions.length - 1 && postDelay > 0) {
           setPostingStatus(`${postDelay}s অপেক্ষা...`);
@@ -347,9 +370,13 @@ export default function QuizDetail() {
         setPostProgress(100);
       }
 
-      await fetch(apiUrl(`/api/quizzes/${numId}/mark-posted`), {
-        method: "POST", headers: authHeaders(), body: JSON.stringify({ channelId }),
-      });
+      clearResume(numId); setResumeState(null);
+
+      try {
+        await fetch(apiUrl(`/api/quizzes/${numId}/mark-posted`), {
+          method: "POST", headers: authHeaders(), body: JSON.stringify({ channelId }),
+        });
+      } catch { /* posting already succeeded — bookkeeping is best-effort */ }
 
       queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(numId) });
       queryClient.invalidateQueries({ queryKey: getListQuizzesQueryKey() });
@@ -357,7 +384,12 @@ export default function QuizDetail() {
       toast({ title: "✅ সফলভাবে পোস্ট হয়েছে!", description: `${posted}টি প্রশ্ন পাঠানো হয়েছে।` });
       setShowTg(false); setPostProgress(0); setPostingStatus("");
     } catch (err) {
-      toast({ title: "Network error", description: err instanceof Error ? err.message : "Telegram-এ পৌঁছানো যাচ্ছে না।", variant: "destructive" });
+      remember(posted, introMsgId, err instanceof Error ? err.message : "network");
+      toast({
+        title: "Network error",
+        description: `${posted}টি প্রশ্ন পোস্ট হয়েছে — পরে ${posted + 1} নম্বর থেকে আবার শুরু করতে পারবেন।`,
+        variant: "destructive",
+      });
       setPostProgress(0); setPostingStatus("");
     }
   };
