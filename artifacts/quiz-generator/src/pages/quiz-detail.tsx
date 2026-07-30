@@ -39,7 +39,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { exportQuizAsPDF, defaultPdfOptions, type PdfOptions, type PdfTheme, type PdfContentMode } from "@/lib/pdf-export";
 import { exportQuizAsCSV, exportQuizAsJSON } from "@/lib/csv-export";
 import { formatMathText } from "@/lib/text-format";
 
@@ -236,9 +235,6 @@ export default function QuizDetail() {
   }
 
   // ── Misc helpers ──────────────────────────────────────────────────────────
-  const setPdfOpt = <K extends keyof PdfOptions>(k: K, v: PdfOptions[K]) =>
-    setPdfOptions(p => ({ ...p, [k]: v }));
-
   const wrapSelection = (open: string, close: string) => {
     const el = introTextRef.current;
     if (!el) return;
@@ -497,16 +493,6 @@ export default function QuizDetail() {
   };
 
   // ── Export ────────────────────────────────────────────────────────────────
-  const handleDownloadPDF = async () => {
-    if (!quiz) return;
-    setPdfExporting(true);
-    try {
-      await exportQuizAsPDF({ title: quiz.title, questions: quiz.questions as QuizQuestion[], createdAt: quiz.createdAt, telegramChannel: quiz.telegramChannel }, pdfOptions);
-      toast({ title: pdfOptions.separateSheets ? "✅ 2টি PDF ডাউনলোড হয়েছে" : "✅ PDF ডাউনলোড হয়েছে" });
-      setShowPdf(false);
-    } catch (err) { toast({ title: "PDF export ব্যর্থ", description: err instanceof Error ? err.message : undefined, variant: "destructive" }); }
-    finally { setPdfExporting(false); }
-  };
 
   // ── Render guards ─────────────────────────────────────────────────────────
   if (isLoading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
@@ -550,7 +536,6 @@ export default function QuizDetail() {
         <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:shrink-0">
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsCSV({ title: quiz.title, questions: quiz.questions as QuizQuestion[] }); toast({ title: "✅ CSV ডাউনলোড হয়েছে" }); }}><FileText className="w-4 h-4 mr-1" /> CSV</Button>
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsJSON({ id: quiz.id, title: quiz.title, questions: quiz.questions as QuizQuestion[], createdAt: quiz.createdAt, telegramChannel: quiz.telegramChannel }); toast({ title: "✅ JSON ডাউনলোড হয়েছে" }); }}><FileJson className="w-4 h-4 mr-1" /> JSON</Button>
-          <Button variant="outline" size="sm" onClick={() => setShowPdf(true)}><Download className="w-4 h-4 mr-1" /> PDF</Button>
           <Button size="sm" onClick={() => setShowTg(true)} className="bg-[#0088cc] hover:bg-[#0077b3]"><Send className="w-4 h-4 mr-1" /> Telegram</Button>
           <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setShowDelete(true)}><Trash2 className="w-4 h-4" /></Button>
         </div>
@@ -803,117 +788,6 @@ export default function QuizDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* ═══════════════════════════════ PDF DIALOG ════════════════════════════ */}
-      <Dialog open={showPdf} onOpenChange={setShowPdf}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4 text-primary" /> PDF Export সেটিং</DialogTitle>
-            <DialogDescription className="sr-only">PDF export options for the quiz</DialogDescription>
-          </DialogHeader>
-          <Tabs defaultValue="style">
-            <TabsList className="w-full grid grid-cols-4 h-9">
-              <TabsTrigger value="style" className="text-xs">🎨 Style</TabsTrigger>
-              <TabsTrigger value="layout" className="text-xs">📐 Layout</TabsTrigger>
-              <TabsTrigger value="content" className="text-xs">📋 Content</TabsTrigger>
-              <TabsTrigger value="text" className="text-xs">✏️ Header</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="style" className="space-y-5 pt-3">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Theme</Label>
-                <div className="grid grid-cols-5 gap-2">
-                  {([{id:"teal",label:"Teal",color:"#007B6E"},{id:"blue",label:"Blue",color:"#2563EB"},{id:"purple",label:"Purple",color:"#7C3AED"},{id:"dark",label:"Dark",color:"#1e293b"},{id:"minimal",label:"Minimal",color:"#444"}] as {id:PdfTheme;label:string;color:string}[]).map(({id,label,color}) => (
-                    <button key={id} onClick={() => setPdfOpt("theme", id)} className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 text-xs font-medium transition-all ${pdfOptions.theme===id?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/70"}`}>
-                      <span className="w-7 h-7 rounded-full border border-black/10 shadow-sm" style={{background:color}} />
-                      {label}
-                      {pdfOptions.theme===id && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Watermark</Label>
-                <Input placeholder='"DRAFT" বা "HSC 2025"' value={pdfOptions.watermarkText} onChange={e => setPdfOpt("watermarkText", e.target.value)} className="text-sm" maxLength={40} />
-                {pdfOptions.watermarkText && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs text-muted-foreground"><span>Opacity</span><span>{pdfOptions.watermarkOpacity}%</span></div>
-                    <Slider min={5} max={60} step={5} value={[pdfOptions.watermarkOpacity]} onValueChange={([v]) => setPdfOpt("watermarkOpacity", v)} />
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="layout" className="space-y-5 pt-3">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Columns</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {([{v:1,label:"1 Column",desc:"Single column — সহজ পড়া"},{v:2,label:"2 Columns",desc:"Side by side — বেশি প্রশ্ন / পাতা"}] as {v:1|2;label:string;desc:string}[]).map(({v,label,desc}) => (
-                    <button key={v} onClick={() => setPdfOpt("columns", v)} className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.columns===v?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                      <Columns className={`w-5 h-5 ${pdfOptions.columns===v?"text-primary":"text-muted-foreground"}`} />
-                      <div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-muted-foreground">{desc}</p></div>
-                      {pdfOptions.columns===v && <Check className="w-4 h-4 text-primary ml-auto" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Font Size</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["small","medium","large"] as const).map(fs => (
-                    <button key={fs} onClick={() => setPdfOpt("fontSize", fs)} className={`p-2.5 rounded-xl border-2 text-sm font-medium transition-all capitalize ${pdfOptions.fontSize===fs?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                      {fs==="small"?"Small":fs==="medium"?"Medium":"Large"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="content" className="space-y-3 pt-3">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">PDF Content</Label>
-              {([{id:"questions",label:"Questions Only",desc:"শুধু প্রশ্ন — উত্তর নেই",icon:"📋"},{id:"answers",label:"Questions + Answers",desc:"সঠিক উত্তর হাইলাইট",icon:"✅"},{id:"full",label:"Full (Q + A + Explanation)",desc:"প্রশ্ন, উত্তর, ব্যাখ্যা",icon:"📖"}] as {id:PdfContentMode;label:string;desc:string;icon:string}[]).map(({id,label,desc,icon}) => (
-                <button key={id} onClick={() => { setPdfOpt("contentMode", id); setPdfOpt("separateSheets", false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.contentMode===id&&!pdfOptions.separateSheets?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                  <span className="text-xl shrink-0">{icon}</span>
-                  <div className="flex-1"><p className="text-sm font-semibold">{label}</p><p className="text-xs text-muted-foreground">{desc}</p></div>
-                  {pdfOptions.contentMode===id&&!pdfOptions.separateSheets&&<Check className="w-4 h-4 text-primary shrink-0" />}
-                </button>
-              ))}
-              <button onClick={() => setPdfOpt("separateSheets", !pdfOptions.separateSheets)} className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.separateSheets?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                <span className="text-xl shrink-0">📦</span>
-                <div className="flex-1"><p className="text-sm font-semibold">Separate Sheets</p><p className="text-xs text-muted-foreground">2 আলাদা PDF — Question Sheet + Answer Key</p></div>
-                {pdfOptions.separateSheets&&<Check className="w-4 h-4 text-primary shrink-0" />}
-              </button>
-            </TabsContent>
-
-            <TabsContent value="text" className="space-y-4 pt-3">
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Header Text</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1"><Label className="text-[11px] text-muted-foreground">Left</Label><Input placeholder="Quiz Generator" value={pdfOptions.headerLeft} onChange={e => setPdfOpt("headerLeft", e.target.value)} className="text-sm" maxLength={60} /></div>
-                  <div className="space-y-1"><Label className="text-[11px] text-muted-foreground">Right</Label><Input placeholder="(ঐচ্ছিক)" value={pdfOptions.headerRight} onChange={e => setPdfOpt("headerRight", e.target.value)} className="text-sm" maxLength={60} /></div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Footer</Label>
-                <Input placeholder="Generated by Telegram Quiz Generator" value={pdfOptions.footerLeft} onChange={e => setPdfOpt("footerLeft", e.target.value)} className="text-sm" maxLength={80} />
-                <div className="flex items-center gap-3"><Switch id="spn" checked={pdfOptions.showPageNumbers} onCheckedChange={v => setPdfOpt("showPageNumbers", v)} /><Label htmlFor="spn" className="text-sm cursor-pointer">Page numbers দেখান</Label></div>
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <div className="bg-muted/40 rounded-xl px-3 py-2.5 text-xs text-muted-foreground space-y-1 mt-1">
-            <p className="font-semibold text-foreground text-xs mb-1">Export Summary</p>
-            <p>Theme: <span className="text-foreground capitalize font-medium">{pdfOptions.theme}</span> · Layout: <span className="text-foreground font-medium">{pdfOptions.columns}-column, {pdfOptions.fontSize} font</span></p>
-            <p className="text-amber-600">⏳ PDF তৈরিতে ৫–১০ সেকেন্ড লাগতে পারে (Bengali font)।</p>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowPdf(false)}>বাতিল</Button>
-            <Button onClick={handleDownloadPDF} size="sm" className="gap-2 min-w-[140px]" disabled={pdfExporting}>
-              {pdfExporting ? <><Loader2 className="w-4 h-4 animate-spin" /> PDF তৈরি হচ্ছে...</> : <><Download className="w-4 h-4" /> PDF ডাউনলোড</>}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ═══════════════════════════════ GENERATE MORE ══════════════════════════ */}
       <Dialog open={showGenerateMore} onOpenChange={setShowGenerateMore}>
