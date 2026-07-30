@@ -18,6 +18,8 @@ import {
   AlertCircle, FlaskConical, Stethoscope, GraduationCap, BookOpen, Atom, Globe,
 } from "lucide-react";
 import { extractTextFromImage } from "@/lib/ocr";
+import { apiUrl } from "@/lib/api-base";
+
 
 type OCRState = "idle" | "loading" | "done" | "error";
 
