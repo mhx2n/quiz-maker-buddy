@@ -52,7 +52,14 @@ function applyMarker(text: string, marker: "^" | "_"): string {
       .replace(new RegExp(`${esc}\\(([^()]{1,12})\\)`, "g"), (m, body: string) => convert(body, map, already) ?? m)
       // ^-2  ^2n  _2
       .replace(new RegExp(`${esc}(-?[0-9A-Za-z${marker === "^" ? "⁰¹²³⁴⁵⁶⁷⁸⁹" : "₀₁₂₃₄₅₆₇₈₉"}]{1,4})`, "g"),
-        (m, body: string) => convert(body, map, already) ?? m);
+        (m: string, body: string) => {
+          // Prefer the longest convertible prefix: "H_2O" must become "H₂O", not stay raw.
+          for (let len = body.length; len > 0; len--) {
+            const converted = convert(body.slice(0, len), map, already);
+            if (converted) return converted + body.slice(len);
+          }
+          return m;
+        });
     if (result === before) break;
   }
   return result;
