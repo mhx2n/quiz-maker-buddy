@@ -26,18 +26,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import {
-  ArrowLeft, Send, Download, Trash2, Check, X, Edit2, Loader2, FileText, FileJson,
-  ChevronDown, ChevronUp, Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles,
-  Pin, Plus, Image, Bold, Italic, Trophy, Columns, Star, Layers,
+  ArrowLeft, Send, Trash2, Check, X, Edit2, Loader2, FileText, FileJson,
+  Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles,
+  Pin, Plus, Image, Bold, Italic, Trophy, Star, RotateCcw,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { exportQuizAsCSV, exportQuizAsJSON } from "@/lib/csv-export";
 import { formatMathText } from "@/lib/text-format";
