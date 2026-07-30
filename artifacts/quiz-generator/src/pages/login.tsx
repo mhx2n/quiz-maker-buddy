@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Zap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
+import { authApi } from "@/lib/auth-api";
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -16,6 +17,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [accessCode, setAccessCode] = useState("");
+  const [config, setConfig] = useState<{ requireAccessCode: boolean; firstRun: boolean } | null>(null);
+
+  useEffect(() => {
+    authApi
+      .config()
+      .then(setConfig)
+      .catch(() => setConfig({ requireAccessCode: false, firstRun: false }));
+  }, []);
+
+  const needsCode = Boolean(config?.requireAccessCode && !config?.firstRun);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -23,7 +35,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       if (mode === "login") await login(email.trim(), password);
-      else await register(email.trim(), password, name.trim() || undefined);
+      else await register(email.trim(), password, name.trim() || undefined, accessCode.trim() || undefined);
       navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -49,6 +61,22 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
+            {mode === "register" && needsCode && (
+              <div className="space-y-2">
+                <Label htmlFor="accessCode">Access code</Label>
+                <Input
+                  id="accessCode"
+                  required
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
+                  placeholder="XXXX-XXXX"
+                  className="font-mono tracking-wider"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Get your personal code from the Telegram bot of this platform.
+                </p>
+              </div>
+            )}
             {mode === "register" && (
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
