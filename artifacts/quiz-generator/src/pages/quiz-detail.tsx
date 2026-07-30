@@ -164,10 +164,10 @@ export default function QuizDetail() {
   const introTextRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // Resume-after-failure state
+  const [resumeState, setResumeState] = useState<ResumeState | null>(null);
+
   // ── Other dialog state ───────────────────────────────────────────────────
-  const [showPdf, setShowPdf] = useState(false);
-  const [pdfOptions, setPdfOptions] = useState<PdfOptions>(defaultPdfOptions);
-  const [pdfExporting, setPdfExporting] = useState(false);
 
   const [showGenerateMore, setShowGenerateMore] = useState(false);
   const [moreCount, setMoreCount] = useState(5);
@@ -191,13 +191,14 @@ export default function QuizDetail() {
   const deleteQuiz = useDeleteQuiz();
   const validateBot = useValidateTelegramBot();
 
-  // Load last-used channel on mount
+  // Load last-used channel + any unfinished posting run on mount
   useEffect(() => {
     const all = loadAllChannels();
     const sorted = Object.values(all).sort((a, b) => b.lastUsed - a.lastUsed);
     if (sorted[0]) applyChannelConfig(sorted[0]);
+    if (numId) setResumeState(loadResume(numId));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [numId]);
 
   // ── Per-channel helpers ───────────────────────────────────────────────────
   function applyChannelConfig(cfg: ChannelConfig) {
