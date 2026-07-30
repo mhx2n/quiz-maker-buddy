@@ -232,8 +232,13 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
     colIndex = 0;
   };
 
-  const overflows = (block: HTMLElement) =>
-    block.getBoundingClientRect().bottom > colsBox.getBoundingClientRect().bottom - 2;
+  // html2canvas re-lays the clone out with slightly taller line boxes, so keep a
+  // safety strip at the bottom of every column — a question is never cut in half.
+  const overflows = (block: HTMLElement) => {
+    const box = colsBox.getBoundingClientRect();
+    const safety = Math.max(28, box.height * 0.09);
+    return block.getBoundingClientRect().bottom > box.bottom - safety;
+  };
 
   quiz.questions.forEach((q, i) => {
     const wrapper = document.createElement("div");
