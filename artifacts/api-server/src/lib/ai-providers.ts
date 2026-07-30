@@ -51,7 +51,22 @@ export const PROVIDERS: ProviderDef[] = [
 ];
 
 export function providerDef(id: string): ProviderDef {
-  return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[PROVIDERS.length - 1]!;
+  const found = PROVIDERS.find((p) => p.id === id);
+  if (found) return found;
+  const fallback = PROVIDERS[PROVIDERS.length - 1];
+  if (!fallback) throw new Error("No AI providers are configured");
+  return fallback;
+}
+
+function cleanModelName(value?: string | null): string | undefined {
+  const model = value?.trim();
+  if (!model) return undefined;
+  if (["auto", "default", "provider-default"].includes(model.toLowerCase())) return undefined;
+  return model;
+}
+
+function resolveModel(key: ApiKeyRow, def: ProviderDef, requested?: string): string {
+  return cleanModelName(key.model) ?? cleanModelName(requested) ?? def.defaultModel;
 }
 
 const QUOTA_PATTERNS = [
@@ -86,7 +101,7 @@ async function callOpenAiCompatible(
 ): Promise<string> {
   const baseUrl = (key.baseUrl || def.baseUrl).replace(/\/$/, "");
   if (!baseUrl) throw new Error("Missing base URL for custom provider");
-  const model = key.model || params.model || def.defaultModel;
+  const model = resolveModel(key, def, params.model);
 
   const messages = params.messages.map((m) => {
     if (typeof m.content === "string") return { role: m.role, content: m.content };
@@ -134,7 +149,7 @@ async function callGemini(
   params: ChatParams,
   timeoutMs: number,
 ): Promise<string> {
-  const model = key.model || def.defaultModel;
+  const model = resolveModel(key, def, params.model);
   const baseUrl = (key.baseUrl || def.baseUrl).replace(/\/$/, "");
 
   const systemText = params.messages
@@ -203,7 +218,7 @@ async function callKey(key: ApiKeyRow, params: ChatParams, timeoutMs: number): P
 // ── Key selection + rotation ───────────────────────────────────────────────
 async function usableKeys(): Promise<ApiKeyRow[]> {
   const now = new Date();
-  return db
+  const ready = await db
     .select()
     .from(apiKeysTable)
     .where(
@@ -212,6 +227,17 @@ async function usableKeys(): Promise<ApiKeyRow[]> {
         or(isNull(apiKeysTable.cooldownUntil), sql`${apiKeysTable.cooldownUntil} <= ${now}`),
       ),
     )
+    .orderBy(asc(apiKeysTable.priority), asc(apiKeysTable.lastUsedAt), asc(apiKeysTable.id));
+
+  if (ready.length > 0) return ready;
+
+  // If every active key is in a short cooldown, still retry them once so a fixed
+  // model/key starts working immediately after deploy instead of showing a vague
+  // "no usable key" message.
+  return db
+    .select()
+    .from(apiKeysTable)
+    .where(eq(apiKeysTable.isActive, true))
     .orderBy(asc(apiKeysTable.priority), asc(apiKeysTable.lastUsedAt), asc(apiKeysTable.id));
 }
 
