@@ -1,4 +1,5 @@
 services:
+  # API + Telegram bot run in the same Render web service (free plan friendly).
   - type: web
     name: telegram-quiz-api
     env: node
@@ -6,12 +7,24 @@ services:
     rootDir: .
     buildCommand: pnpm install && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps ./artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        sync: false   # paste your Neon connection string here
+        sync: false # Neon / Postgres connection string
+      - key: JWT_SECRET
+        sync: false # any long random string
+      - key: ADMIN_EMAIL
+        sync: false # this email always gets the admin role
+      # Everything below can also be configured from the admin panel instead:
+      - key: TELEGRAM_ERROR_BOT_TOKEN
+        sync: false # bot added to your private group
+      - key: TELEGRAM_ERROR_GROUP_ID
+        sync: false # e.g. -1001234567890
+      - key: MONGODB_URI
+        sync: false # backup target (MongoDB Atlas free tier)
       - key: GROQ_API_KEY
-        sync: false   # free from https://console.groq.com
+        sync: false # optional bootstrap AI key
