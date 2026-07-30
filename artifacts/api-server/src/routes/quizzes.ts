@@ -242,26 +242,23 @@ ${existingCtx}`,
     .replace(/\s*```$/i, "")
     .trim();
 
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-if (!jsonMatch) {
-  console.log("AI gave invalid format, retrying...");
-  
-  // retry once
-  const retryResponse = await openai.chat.completions.create({
-    model: AI_MODEL,
-    max_completion_tokens: 8000,
-    temperature: 0.3,
-    messages: messages,
-  });
+  let jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    // Retry once with a tighter, cheaper request before giving up.
+    const retryResponse = await openai.chat.completions.create({
+      model: AI_MODEL,
+      max_completion_tokens: 8000,
+      temperature: 0.3,
+      messages: callMessages,
+    });
 
-  const retryRaw = retryResponse.choices[0]?.message?.content ?? "[]";
-  const retryMatch = retryRaw.match(/\[[\s\S]*\]/);
+    const retryRaw = retryResponse.choices[0]?.message?.content ?? "[]";
+    jsonMatch = retryRaw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+  }
 
-  if (!retryMatch) return [];
-
-  jsonStr = retryMatch[0];
-}
   let jsonStr = jsonMatch[0];
+
 
   jsonStr = jsonStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
   jsonStr = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
