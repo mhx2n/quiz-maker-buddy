@@ -1,4 +1,11 @@
+import { apiUrl, API_BASE } from "./api-base";
+
+/** Shown when the Express API server cannot be reached (not deployed / not running). */
+export const API_UNREACHABLE =
+  "API server is not reachable. Start the backend locally, or set VITE_API_URL to your deployed API URL.";
+
 export type AuthUser = {
+
   id: number;
   email: string;
   name: string;
@@ -126,19 +133,36 @@ export function setToken(token: string | null) {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`/api${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(`/api${path}`), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error(API_UNREACHABLE);
+  }
 
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
-  const data = text ? (JSON.parse(text) as unknown) : null;
+  // A 404 that returns HTML means we hit the static frontend, not the API.
+  const looksLikeHtml = text.trimStart().startsWith("<");
+  if (!res.ok && (res.status === 404 || res.status === 502) && looksLikeHtml) {
+    throw new Error(API_UNREACHABLE);
+  }
+
+  let data: unknown = null;
+  try {
+    data = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    if (!res.ok) throw new Error(API_UNREACHABLE);
+    throw new Error("Unexpected response from the server.");
+  }
 
   if (!res.ok) {
     const message =
@@ -150,6 +174,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   return data as T;
 }
+
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 export const authApi = {
@@ -232,7 +257,7 @@ export function reportClientError(payload: {
   extra?: Record<string, unknown>;
 }) {
   try {
-    void fetch("/api/client-errors", {
+    void fetch(apiUrl("/api/client-errors"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
