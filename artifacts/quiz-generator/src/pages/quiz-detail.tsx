@@ -351,26 +351,27 @@ export default function QuizDetail() {
 
   // ── Generate more ─────────────────────────────────────────────────────────
   const handleGenerateMore = async () => {
-    setGeneratingMore(true);
-    if (questions.length + moreCount > 30) {
+    if (questions.length + moreCount > 1000) {
       toast({
         title: "Limit exceeded",
-        description: "Max 30 questions allowed",
+        description: "Max 1000 questions allowed per quiz",
         variant: "destructive"
       });
       return;
     }
+    setGeneratingMore(true);
     try {
       let remaining = moreCount;
 
       while (remaining > 0) {
         const batch = Math.min(5, remaining);
 
-        const r = await fetch(`/api/quizzes/${numId}/add-questions`, {
+        const r = await fetch(apiUrl(`/api/quizzes/${numId}/add-questions`), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify({ additionalCount: batch, language: "Bengali" }),
         });
+
 
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || "Failed");
