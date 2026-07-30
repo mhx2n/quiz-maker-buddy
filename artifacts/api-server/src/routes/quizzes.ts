@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { and, eq, sql } from "drizzle-orm";
-import { db, quizzesTable } from "@workspace/db";
+import { db, quizzesTable, type QuizQuestion } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
   GenerateQuizBody,
