@@ -333,16 +333,23 @@ export default function CreateQuiz() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-sm font-medium">প্রশ্নের সংখ্যা</Label>
-                <span className="text-2xl font-bold text-primary tabular-nums">{questionCount}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={questionCount}
+                  onChange={(e) => setQuestionCount(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  className="w-20 h-9 text-center text-base font-bold text-primary tabular-nums"
+                />
               </div>
-              <Slider min={1} max={50} step={1} value={[questionCount]} onValueChange={([v]) => setQuestionCount(v)} className="w-full" />
+              <Slider min={1} max={100} step={1} value={[questionCount]} onValueChange={([v]) => setQuestionCount(v)} className="w-full" />
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>1</span>
-                <span>10</span>
                 <span>25</span>
                 <span>50</span>
+                <span>100</span>
               </div>
-              {questionCount > 20 && (
+              {questionCount > 25 && (
                 <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-2.5 py-1.5">
                   ⏳ {questionCount} প্রশ্নের জন্য batch-এ generate হবে — একটু বেশি সময় লাগতে পারে।
                 </p>
