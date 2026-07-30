@@ -219,20 +219,21 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
   host.appendChild(page);
   pages.push(page);
 
-  const GAP = 9;
   let colIndex = 0;
-  let used = 0; // height already consumed by the current column
   let columns = Array.from(page.querySelectorAll(".col")) as HTMLElement[];
-  let limit = (page.querySelector(".cols") as HTMLElement).clientHeight;
+  let colsBox = page.querySelector(".cols") as HTMLElement;
 
   const nextPage = () => {
     page = pageShell(opts, quiz, label, false);
     host.appendChild(page);
     pages.push(page);
     columns = Array.from(page.querySelectorAll(".col")) as HTMLElement[];
-    limit = (page.querySelector(".cols") as HTMLElement).clientHeight;
+    colsBox = page.querySelector(".cols") as HTMLElement;
     colIndex = 0;
   };
+
+  const overflows = (block: HTMLElement) =>
+    block.getBoundingClientRect().bottom > colsBox.getBoundingClientRect().bottom - 2;
 
   quiz.questions.forEach((q, i) => {
     const wrapper = document.createElement("div");
@@ -241,25 +242,15 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
 
     let col = columns[colIndex]!;
     col.appendChild(block);
-    const h = block.getBoundingClientRect().height;
-    const needed = used === 0 ? h : used + GAP + h;
 
-    // Never let a question be cut in half — move it to the next column/page.
-    if (needed > limit && col.children.length > 1) {
+    // Ground-truth check: a question is never allowed to cross the page edge.
+    if (overflows(block) && col.children.length > 1) {
       col.removeChild(block);
-      if (colIndex + 1 < columns.length) {
-        colIndex++;
-      } else {
-        nextPage();
-      }
-      used = 0;
+      if (colIndex + 1 < columns.length) colIndex++;
+      else nextPage();
       col = columns[colIndex]!;
       col.appendChild(block);
-      used = block.getBoundingClientRect().height;
-    } else {
-      used = needed;
     }
-    if ((window as any).__pdfdbg) console.log('q', i, 'h', Math.round(h), 'used', Math.round(used), 'limit', limit, 'col', colIndex, 'page', pages.length);
   });
 
   return { host, pages };
