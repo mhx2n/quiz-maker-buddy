@@ -49,10 +49,12 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: apiProxy,
     fs: {
       strict: true,
     },
   },
+
   preview: {
     port,
     host: "0.0.0.0",
