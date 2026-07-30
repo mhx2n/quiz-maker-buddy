@@ -29,7 +29,7 @@ const ENV_FALLBACK: AppSettings = {
   mongoUri: process.env["MONGODB_URI"] ?? "",
   mongoBackupEnabled: Boolean(process.env["MONGODB_URI"]),
   notifyOnError: true,
-  aiTimeoutMs: 60000,
+  aiTimeoutMs: 120000,
 };
 
 const SETTINGS_KEY = "platform";
