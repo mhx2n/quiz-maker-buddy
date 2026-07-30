@@ -181,9 +181,17 @@ export default function CreateQuiz() {
           setLocation(`/quiz/${quiz.id}`);
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Could not generate quiz. Please try again.";
-          toast({ title: "Generation failed", description: msg.replace(/^HTTP \d+ [^:]+: /, ""), variant: "destructive" });
+          const raw = err instanceof Error ? err.message : "Could not generate quiz. Please try again.";
+          const isNetwork = /NetworkError|Failed to fetch|network|load failed/i.test(raw);
+          toast({
+            title: "Generation failed",
+            description: isNetwork
+              ? "সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে (free hosting ঘুমিয়ে ছিল বা রিকোয়েস্ট বেশি সময় নিয়েছে)। ১০ সেকেন্ড পর আবার Generate চাপুন — প্রশ্নসংখ্যা কম রাখলে দ্রুত হবে।"
+              : raw.replace(/^HTTP \d+ [^:]+: /, ""),
+            variant: "destructive",
+          });
         },
+
       }
     );
   };
