@@ -87,6 +87,34 @@ function deleteChannelConfig(id: string) {
   localStorage.setItem(CHANNELS_KEY, JSON.stringify(all));
 }
 
+// ── Resumable posting ─────────────────────────────────────────────────────────
+/** Where a Telegram posting run stopped, so it can continue instead of restarting. */
+type ResumeState = {
+  channelId: string;
+  nextIndex: number;      // index of the first question NOT yet posted
+  introMsgId: number | null;
+  total: number;
+  error?: string;
+  at: number;
+};
+
+const resumeKey = (quizId: number) => `tg_resume_v1_${quizId}`;
+
+function loadResume(quizId: number): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(quizId));
+    if (!raw) return null;
+    const st = JSON.parse(raw) as ResumeState;
+    return st && typeof st.nextIndex === "number" && st.nextIndex > 0 ? st : null;
+  } catch { return null; }
+}
+function saveResume(quizId: number, st: ResumeState) {
+  try { localStorage.setItem(resumeKey(quizId), JSON.stringify(st)); } catch { /* quota */ }
+}
+function clearResume(quizId: number) {
+  try { localStorage.removeItem(resumeKey(quizId)); } catch { /* ignore */ }
+}
+
 // ── Telegram API helper ───────────────────────────────────────────────────────
 async function tgApi(token: string, method: string, body: Record<string, unknown>) {
   const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
