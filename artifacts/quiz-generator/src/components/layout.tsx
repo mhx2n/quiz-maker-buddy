@@ -14,7 +14,7 @@ export function Layout({ children }: { children: ReactNode }) {
   ];
 
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden">
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden">
       {/* Sidebar — desktop only */}
       <aside className="w-64 border-r bg-card flex-col hidden md:flex shrink-0">
         <div className="h-16 flex items-center px-6 border-b">
@@ -93,7 +93,7 @@ export function Layout({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-8 pb-24 md:pb-8">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-8 pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-8">
           <div className="max-w-6xl mx-auto h-full">
             {children}
           </div>

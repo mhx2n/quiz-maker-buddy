@@ -26,20 +26,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import {
-  ArrowLeft, Send, Download, Trash2, Check, X, Edit2, Loader2, FileText, FileJson,
-  ChevronDown, ChevronUp, Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles,
-  Pin, Plus, Image, Bold, Italic, Trophy, Columns, Star, Layers,
+  ArrowLeft, Send, Trash2, Check, X, Edit2, Loader2, FileText, FileJson,
+  Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles, ChevronDown, ChevronUp,
+  Pin, Plus, Image, Bold, Italic, Trophy, Star, RotateCcw,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { exportQuizAsPDF, defaultPdfOptions, type PdfOptions, type PdfTheme, type PdfContentMode } from "@/lib/pdf-export";
 import { exportQuizAsCSV, exportQuizAsJSON } from "@/lib/csv-export";
 import { formatMathText } from "@/lib/text-format";
 
@@ -85,6 +80,34 @@ function deleteChannelConfig(id: string) {
   const all = loadAllChannels();
   delete all[id];
   localStorage.setItem(CHANNELS_KEY, JSON.stringify(all));
+}
+
+// ── Resumable posting ─────────────────────────────────────────────────────────
+/** Where a Telegram posting run stopped, so it can continue instead of restarting. */
+type ResumeState = {
+  channelId: string;
+  nextIndex: number;      // index of the first question NOT yet posted
+  introMsgId: number | null;
+  total: number;
+  error?: string;
+  at: number;
+};
+
+const resumeKey = (quizId: number) => `tg_resume_v1_${quizId}`;
+
+function loadResume(quizId: number): ResumeState | null {
+  try {
+    const raw = localStorage.getItem(resumeKey(quizId));
+    if (!raw) return null;
+    const st = JSON.parse(raw) as ResumeState;
+    return st && typeof st.nextIndex === "number" && st.nextIndex > 0 ? st : null;
+  } catch { return null; }
+}
+function saveResume(quizId: number, st: ResumeState) {
+  try { localStorage.setItem(resumeKey(quizId), JSON.stringify(st)); } catch { /* quota */ }
+}
+function clearResume(quizId: number) {
+  try { localStorage.removeItem(resumeKey(quizId)); } catch { /* ignore */ }
 }
 
 // ── Telegram API helper ───────────────────────────────────────────────────────
@@ -136,10 +159,10 @@ export default function QuizDetail() {
   const introTextRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // Resume-after-failure state
+  const [resumeState, setResumeState] = useState<ResumeState | null>(null);
+
   // ── Other dialog state ───────────────────────────────────────────────────
-  const [showPdf, setShowPdf] = useState(false);
-  const [pdfOptions, setPdfOptions] = useState<PdfOptions>(defaultPdfOptions);
-  const [pdfExporting, setPdfExporting] = useState(false);
 
   const [showGenerateMore, setShowGenerateMore] = useState(false);
   const [moreCount, setMoreCount] = useState(5);
@@ -163,13 +186,14 @@ export default function QuizDetail() {
   const deleteQuiz = useDeleteQuiz();
   const validateBot = useValidateTelegramBot();
 
-  // Load last-used channel on mount
+  // Load last-used channel + any unfinished posting run on mount
   useEffect(() => {
     const all = loadAllChannels();
     const sorted = Object.values(all).sort((a, b) => b.lastUsed - a.lastUsed);
     if (sorted[0]) applyChannelConfig(sorted[0]);
+    if (numId) setResumeState(loadResume(numId));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [numId]);
 
   // ── Per-channel helpers ───────────────────────────────────────────────────
   function applyChannelConfig(cfg: ChannelConfig) {
@@ -207,9 +231,6 @@ export default function QuizDetail() {
   }
 
   // ── Misc helpers ──────────────────────────────────────────────────────────
-  const setPdfOpt = <K extends keyof PdfOptions>(k: K, v: PdfOptions[K]) =>
-    setPdfOptions(p => ({ ...p, [k]: v }));
-
   const wrapSelection = (open: string, close: string) => {
     const el = introTextRef.current;
     if (!el) return;
@@ -233,26 +254,38 @@ export default function QuizDetail() {
     });
   };
 
-  // ── Post to Telegram ──────────────────────────────────────────────────────
-  const handlePost = async () => {
+  // ── Post to Telegram (resumable) ──────────────────────────────────────────
+  const handlePost = async (opts?: { resume?: boolean }) => {
     if (!botToken.trim() || !channelId.trim()) {
       toast({ title: "Bot token এবং Channel ID দরকার", variant: "destructive" }); return;
     }
     const questions = quiz?.questions as QuizQuestion[];
     if (!questions?.length) return;
 
+    const resuming = !!opts?.resume && resumeState?.channelId === channelId;
+    const startIndex = resuming ? Math.min(resumeState!.nextIndex, questions.length) : 0;
+
     // Save config for this channel
     const cfg = currentConfig();
     saveChannelConfig(cfg);
     setSavedChannels(loadAllChannels());
 
-    setPostProgress(0); setPostingStatus("শুরু হচ্ছে...");
+    setPostProgress(1); setPostingStatus(resuming ? `প্রশ্ন ${startIndex + 1} থেকে আবার শুরু...` : "শুরু হচ্ছে...");
+
+    // Fail-safe: remember where we stopped so the user can resume later.
+    const remember = (nextIndex: number, introMsgId: number | null, error?: string) => {
+      if (nextIndex >= questions.length) { clearResume(numId); setResumeState(null); return; }
+      const st: ResumeState = { channelId, nextIndex, introMsgId, total: questions.length, error, at: Date.now() };
+      saveResume(numId, st);
+      setResumeState(st);
+    };
+
+    let introMsgId: number | null = resuming ? (resumeState?.introMsgId ?? null) : null;
+    let posted = startIndex;
 
     try {
-      let introMsgId: number | null = null;
-
-      // ── Step 1: Intro message ──────────────────────────────────────────
-      if (enableIntro && (introText.trim() || introPhotoFile)) {
+      // ── Step 1: Intro message (skipped when resuming) ──────────────────
+      if (!resuming && enableIntro && (introText.trim() || introPhotoFile)) {
         setPostingStatus("Intro message পাঠানো হচ্ছে...");
         const caption = introText.replace(/\{N\}/g, String(questions.length)).replace(/\{TOTAL\}/g, String(questions.length));
 
@@ -302,17 +335,16 @@ export default function QuizDetail() {
       }
 
       // ── Step 3: Post polls ─────────────────────────────────────────────
-      let posted = 0;
       const totalSteps = questions.length + (sendScore && introMsgId ? 1 : 0);
 
-      for (let i = 0; i < questions.length; i++) {
+      for (let i = startIndex; i < questions.length; i++) {
         setPostingStatus(`প্রশ্ন ${i + 1}/${questions.length} পাঠানো হচ্ছে...`);
         const q = questions[i];
         const qBody = formatMathText(q.question);
         const qText = questionPrefix ? `${questionPrefix}\n${qBody}` : qBody;
         const explBody = q.explanation ? formatMathText(q.explanation) : "";
-        // One blank line before the suffix so it never sticks to the explanation.
-        const expl = explBody ? (explanationSuffix ? `${explBody}\n\n${explanationSuffix}` : explBody) : undefined;
+        // Two blank lines before the suffix so it clearly stands apart.
+        const expl = explBody ? (explanationSuffix ? `${explBody}\n\n\n${explanationSuffix}` : explBody) : undefined;
 
         const payload: Record<string, unknown> = {
           chat_id: channelId,
@@ -325,13 +357,25 @@ export default function QuizDetail() {
         };
         if (introMsgId) payload.reply_to_message_id = introMsgId;
 
-        const data = await tgApi(botToken, "sendPoll", payload);
+        // One automatic retry keeps a single flaky request from killing the run.
+        let data = await tgApi(botToken, "sendPoll", payload).catch(() => ({ ok: false, description: "network" }));
         if (!data.ok) {
-          toast({ title: `প্রশ্ন ${i + 1} পাঠাতে ব্যর্থ`, description: data.description, variant: "destructive" });
-          setPostProgress(0); setPostingStatus(""); return;
+          await new Promise(r => setTimeout(r, 2000));
+          data = await tgApi(botToken, "sendPoll", payload).catch(() => ({ ok: false, description: "network" }));
         }
-        posted++;
-        setPostProgress(Math.round((posted / totalSteps) * 100));
+        if (!data.ok) {
+          remember(i, introMsgId, data.description);
+          toast({
+            title: `প্রশ্ন ${i + 1} পাঠাতে ব্যর্থ`,
+            description: `${data.description ?? "Unknown error"} — ${i} টি পোস্ট হয়েছে, ${i + 1} নম্বর থেকে আবার শুরু করা যাবে।`,
+            variant: "destructive",
+          });
+          setPostProgress(0); setPostingStatus("");
+          return;
+        }
+        posted = i + 1;
+        remember(posted, introMsgId);
+        setPostProgress(Math.max(1, Math.round((posted / totalSteps) * 100)));
 
         if (i < questions.length - 1 && postDelay > 0) {
           setPostingStatus(`${postDelay}s অপেক্ষা...`);
@@ -347,9 +391,13 @@ export default function QuizDetail() {
         setPostProgress(100);
       }
 
-      await fetch(apiUrl(`/api/quizzes/${numId}/mark-posted`), {
-        method: "POST", headers: authHeaders(), body: JSON.stringify({ channelId }),
-      });
+      clearResume(numId); setResumeState(null);
+
+      try {
+        await fetch(apiUrl(`/api/quizzes/${numId}/mark-posted`), {
+          method: "POST", headers: authHeaders(), body: JSON.stringify({ channelId }),
+        });
+      } catch { /* posting already succeeded — bookkeeping is best-effort */ }
 
       queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(numId) });
       queryClient.invalidateQueries({ queryKey: getListQuizzesQueryKey() });
@@ -357,7 +405,12 @@ export default function QuizDetail() {
       toast({ title: "✅ সফলভাবে পোস্ট হয়েছে!", description: `${posted}টি প্রশ্ন পাঠানো হয়েছে।` });
       setShowTg(false); setPostProgress(0); setPostingStatus("");
     } catch (err) {
-      toast({ title: "Network error", description: err instanceof Error ? err.message : "Telegram-এ পৌঁছানো যাচ্ছে না।", variant: "destructive" });
+      remember(posted, introMsgId, err instanceof Error ? err.message : "network");
+      toast({
+        title: "Network error",
+        description: `${posted}টি প্রশ্ন পোস্ট হয়েছে — পরে ${posted + 1} নম্বর থেকে আবার শুরু করতে পারবেন।`,
+        variant: "destructive",
+      });
       setPostProgress(0); setPostingStatus("");
     }
   };
@@ -436,16 +489,6 @@ export default function QuizDetail() {
   };
 
   // ── Export ────────────────────────────────────────────────────────────────
-  const handleDownloadPDF = async () => {
-    if (!quiz) return;
-    setPdfExporting(true);
-    try {
-      await exportQuizAsPDF({ title: quiz.title, questions: quiz.questions as QuizQuestion[], createdAt: quiz.createdAt, telegramChannel: quiz.telegramChannel }, pdfOptions);
-      toast({ title: pdfOptions.separateSheets ? "✅ 2টি PDF ডাউনলোড হয়েছে" : "✅ PDF ডাউনলোড হয়েছে" });
-      setShowPdf(false);
-    } catch (err) { toast({ title: "PDF export ব্যর্থ", description: err instanceof Error ? err.message : undefined, variant: "destructive" }); }
-    finally { setPdfExporting(false); }
-  };
 
   // ── Render guards ─────────────────────────────────────────────────────────
   if (isLoading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
@@ -489,7 +532,6 @@ export default function QuizDetail() {
         <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:shrink-0">
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsCSV({ title: quiz.title, questions: quiz.questions as QuizQuestion[] }); toast({ title: "✅ CSV ডাউনলোড হয়েছে" }); }}><FileText className="w-4 h-4 mr-1" /> CSV</Button>
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsJSON({ id: quiz.id, title: quiz.title, questions: quiz.questions as QuizQuestion[], createdAt: quiz.createdAt, telegramChannel: quiz.telegramChannel }); toast({ title: "✅ JSON ডাউনলোড হয়েছে" }); }}><FileJson className="w-4 h-4 mr-1" /> JSON</Button>
-          <Button variant="outline" size="sm" onClick={() => setShowPdf(true)}><Download className="w-4 h-4 mr-1" /> PDF</Button>
           <Button size="sm" onClick={() => setShowTg(true)} className="bg-[#0088cc] hover:bg-[#0077b3]"><Send className="w-4 h-4 mr-1" /> Telegram</Button>
           <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setShowDelete(true)}><Trash2 className="w-4 h-4" /></Button>
         </div>
@@ -566,14 +608,33 @@ export default function QuizDetail() {
 
       {/* ═══════════════════════════════ TELEGRAM DIALOG ════════════════════════ */}
       <Dialog open={showTg} onOpenChange={o => { setShowTg(o); if (!o) { setPostProgress(0); setPostingStatus(""); } }}>
-        <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-lg max-h-[92vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-[#0088cc] flex items-center justify-center"><Send className="w-3.5 h-3.5 text-white" /></div>
-              Telegram-এ পোস্ট করুন
+              <div className="w-7 h-7 rounded-full bg-[#0088cc] flex items-center justify-center shrink-0"><Send className="w-3.5 h-3.5 text-white" /></div>
+              <span className="min-w-0 truncate">Telegram-এ পোস্ট করুন</span>
             </DialogTitle>
             <DialogDescription className="sr-only">Telegram bot settings for posting quizzes</DialogDescription>
           </DialogHeader>
+
+          {resumeState && resumeState.nextIndex < questions.length && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 space-y-1">
+              <p className="font-semibold">⏸️ আগের পোস্টিং অসম্পূর্ণ</p>
+              <p>
+                {resumeState.nextIndex}টি প্রশ্ন ইতিমধ্যে {resumeState.channelId}-এ পোস্ট হয়েছে।
+                বাকি {questions.length - resumeState.nextIndex}টি প্রশ্ন {resumeState.nextIndex + 1} নম্বর থেকে পাঠানো যাবে।
+              </p>
+              {resumeState.error && <p className="opacity-80 break-words">কারণ: {resumeState.error}</p>}
+              <button
+                type="button"
+                onClick={() => { clearResume(numId); setResumeState(null); }}
+                className="underline underline-offset-2 hover:no-underline"
+              >
+                বাতিল করে শুরু থেকে পোস্ট করব
+              </button>
+            </div>
+          )}
+
 
           <Tabs defaultValue="bot">
             <TabsList className="w-full grid grid-cols-3 h-9">
@@ -733,126 +794,24 @@ export default function QuizDetail() {
             </div>
           )}
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setShowTg(false); setPostProgress(0); setPostingStatus(""); }}>বাতিল</Button>
-            <Button onClick={handlePost} disabled={!botToken || !channelId || postProgress > 0} className="bg-[#0088cc] hover:bg-[#0077b3] gap-2">
+          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => { setShowTg(false); setPostProgress(0); setPostingStatus(""); }}>বাতিল</Button>
+            {resumeState && resumeState.channelId === channelId && resumeState.nextIndex < questions.length && (
+              <Button
+                onClick={() => handlePost({ resume: true })}
+                disabled={!botToken || !channelId || postProgress > 0}
+                className="w-full sm:w-auto gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+              >
+                <RotateCcw className="w-4 h-4" /> {resumeState.nextIndex + 1} থেকে চালিয়ে যান
+              </Button>
+            )}
+            <Button onClick={() => handlePost()} disabled={!botToken || !channelId || postProgress > 0} className="w-full sm:w-auto bg-[#0088cc] hover:bg-[#0077b3] gap-2">
               {postProgress > 0 ? <><Loader2 className="w-4 h-4 animate-spin" /> পাঠানো হচ্ছে...</> : <><Send className="w-4 h-4" /> {questions.length}টি প্রশ্ন পোস্ট করুন</>}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ═══════════════════════════════ PDF DIALOG ════════════════════════════ */}
-      <Dialog open={showPdf} onOpenChange={setShowPdf}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4 text-primary" /> PDF Export সেটিং</DialogTitle>
-            <DialogDescription className="sr-only">PDF export options for the quiz</DialogDescription>
-          </DialogHeader>
-          <Tabs defaultValue="style">
-            <TabsList className="w-full grid grid-cols-4 h-9">
-              <TabsTrigger value="style" className="text-xs">🎨 Style</TabsTrigger>
-              <TabsTrigger value="layout" className="text-xs">📐 Layout</TabsTrigger>
-              <TabsTrigger value="content" className="text-xs">📋 Content</TabsTrigger>
-              <TabsTrigger value="text" className="text-xs">✏️ Header</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="style" className="space-y-5 pt-3">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Theme</Label>
-                <div className="grid grid-cols-5 gap-2">
-                  {([{id:"teal",label:"Teal",color:"#007B6E"},{id:"blue",label:"Blue",color:"#2563EB"},{id:"purple",label:"Purple",color:"#7C3AED"},{id:"dark",label:"Dark",color:"#1e293b"},{id:"minimal",label:"Minimal",color:"#444"}] as {id:PdfTheme;label:string;color:string}[]).map(({id,label,color}) => (
-                    <button key={id} onClick={() => setPdfOpt("theme", id)} className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 text-xs font-medium transition-all ${pdfOptions.theme===id?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/70"}`}>
-                      <span className="w-7 h-7 rounded-full border border-black/10 shadow-sm" style={{background:color}} />
-                      {label}
-                      {pdfOptions.theme===id && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Watermark</Label>
-                <Input placeholder='"DRAFT" বা "HSC 2025"' value={pdfOptions.watermarkText} onChange={e => setPdfOpt("watermarkText", e.target.value)} className="text-sm" maxLength={40} />
-                {pdfOptions.watermarkText && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs text-muted-foreground"><span>Opacity</span><span>{pdfOptions.watermarkOpacity}%</span></div>
-                    <Slider min={5} max={60} step={5} value={[pdfOptions.watermarkOpacity]} onValueChange={([v]) => setPdfOpt("watermarkOpacity", v)} />
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="layout" className="space-y-5 pt-3">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Columns</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {([{v:1,label:"1 Column",desc:"Single column — সহজ পড়া"},{v:2,label:"2 Columns",desc:"Side by side — বেশি প্রশ্ন / পাতা"}] as {v:1|2;label:string;desc:string}[]).map(({v,label,desc}) => (
-                    <button key={v} onClick={() => setPdfOpt("columns", v)} className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.columns===v?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                      <Columns className={`w-5 h-5 ${pdfOptions.columns===v?"text-primary":"text-muted-foreground"}`} />
-                      <div><p className="text-sm font-semibold">{label}</p><p className="text-xs text-muted-foreground">{desc}</p></div>
-                      {pdfOptions.columns===v && <Check className="w-4 h-4 text-primary ml-auto" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Font Size</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["small","medium","large"] as const).map(fs => (
-                    <button key={fs} onClick={() => setPdfOpt("fontSize", fs)} className={`p-2.5 rounded-xl border-2 text-sm font-medium transition-all capitalize ${pdfOptions.fontSize===fs?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                      {fs==="small"?"Small":fs==="medium"?"Medium":"Large"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="content" className="space-y-3 pt-3">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">PDF Content</Label>
-              {([{id:"questions",label:"Questions Only",desc:"শুধু প্রশ্ন — উত্তর নেই",icon:"📋"},{id:"answers",label:"Questions + Answers",desc:"সঠিক উত্তর হাইলাইট",icon:"✅"},{id:"full",label:"Full (Q + A + Explanation)",desc:"প্রশ্ন, উত্তর, ব্যাখ্যা",icon:"📖"}] as {id:PdfContentMode;label:string;desc:string;icon:string}[]).map(({id,label,desc,icon}) => (
-                <button key={id} onClick={() => { setPdfOpt("contentMode", id); setPdfOpt("separateSheets", false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.contentMode===id&&!pdfOptions.separateSheets?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                  <span className="text-xl shrink-0">{icon}</span>
-                  <div className="flex-1"><p className="text-sm font-semibold">{label}</p><p className="text-xs text-muted-foreground">{desc}</p></div>
-                  {pdfOptions.contentMode===id&&!pdfOptions.separateSheets&&<Check className="w-4 h-4 text-primary shrink-0" />}
-                </button>
-              ))}
-              <button onClick={() => setPdfOpt("separateSheets", !pdfOptions.separateSheets)} className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${pdfOptions.separateSheets?"border-primary bg-primary/5":"border-transparent bg-muted/40 hover:bg-muted/60"}`}>
-                <span className="text-xl shrink-0">📦</span>
-                <div className="flex-1"><p className="text-sm font-semibold">Separate Sheets</p><p className="text-xs text-muted-foreground">2 আলাদা PDF — Question Sheet + Answer Key</p></div>
-                {pdfOptions.separateSheets&&<Check className="w-4 h-4 text-primary shrink-0" />}
-              </button>
-            </TabsContent>
-
-            <TabsContent value="text" className="space-y-4 pt-3">
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Header Text</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1"><Label className="text-[11px] text-muted-foreground">Left</Label><Input placeholder="Quiz Generator" value={pdfOptions.headerLeft} onChange={e => setPdfOpt("headerLeft", e.target.value)} className="text-sm" maxLength={60} /></div>
-                  <div className="space-y-1"><Label className="text-[11px] text-muted-foreground">Right</Label><Input placeholder="(ঐচ্ছিক)" value={pdfOptions.headerRight} onChange={e => setPdfOpt("headerRight", e.target.value)} className="text-sm" maxLength={60} /></div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Footer</Label>
-                <Input placeholder="Generated by Telegram Quiz Generator" value={pdfOptions.footerLeft} onChange={e => setPdfOpt("footerLeft", e.target.value)} className="text-sm" maxLength={80} />
-                <div className="flex items-center gap-3"><Switch id="spn" checked={pdfOptions.showPageNumbers} onCheckedChange={v => setPdfOpt("showPageNumbers", v)} /><Label htmlFor="spn" className="text-sm cursor-pointer">Page numbers দেখান</Label></div>
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <div className="bg-muted/40 rounded-xl px-3 py-2.5 text-xs text-muted-foreground space-y-1 mt-1">
-            <p className="font-semibold text-foreground text-xs mb-1">Export Summary</p>
-            <p>Theme: <span className="text-foreground capitalize font-medium">{pdfOptions.theme}</span> · Layout: <span className="text-foreground font-medium">{pdfOptions.columns}-column, {pdfOptions.fontSize} font</span></p>
-            <p className="text-amber-600">⏳ PDF তৈরিতে ৫–১০ সেকেন্ড লাগতে পারে (Bengali font)।</p>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowPdf(false)}>বাতিল</Button>
-            <Button onClick={handleDownloadPDF} size="sm" className="gap-2 min-w-[140px]" disabled={pdfExporting}>
-              {pdfExporting ? <><Loader2 className="w-4 h-4 animate-spin" /> PDF তৈরি হচ্ছে...</> : <><Download className="w-4 h-4" /> PDF ডাউনলোড</>}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ═══════════════════════════════ GENERATE MORE ══════════════════════════ */}
       <Dialog open={showGenerateMore} onOpenChange={setShowGenerateMore}>
