@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, quizzesTable } from "@workspace/db";
+import { requireAuth } from "../lib/auth";
 import {
   GenerateQuizBody,
   GetQuizParams,
@@ -15,6 +16,20 @@ import {
 import { aiClient as openai, AI_MODEL, AI_SUPPORTS_VISION, type AIMessage } from "../lib/ai";
 
 const router = Router();
+
+// Every quiz endpoint requires a logged-in user; data is scoped per user.
+router.use("/quizzes", requireAuth);
+
+/** Admins can reach any quiz, regular users only their own. */
+function scopeToUser(req: { user?: { id: number; role: string } }) {
+  const user = req.user!;
+  return user.role === "admin" ? undefined : eq(quizzesTable.userId, user.id);
+}
+
+function withScope(req: { user?: { id: number; role: string } }, condition: ReturnType<typeof eq>) {
+  const scope = scopeToUser(req);
+  return scope ? and(condition, scope) : condition;
+}
 
 function plainTextify(input: string): string {
   return input
@@ -275,12 +290,16 @@ if (!jsonMatch) {
 }
 
 router.get("/quizzes", async (req, res) => {
-  const quizzes = await db.select().from(quizzesTable).orderBy(quizzesTable.createdAt);
+  const scope = scopeToUser(req);
+  const base = db.select().from(quizzesTable);
+  const quizzes = await (scope ? base.where(scope) : base).orderBy(quizzesTable.createdAt);
   res.json(quizzes.map(formatQuiz));
 });
 
 router.get("/quizzes/stats", async (req, res) => {
-  const all = await db.select().from(quizzesTable).orderBy(quizzesTable.createdAt);
+  const scope = scopeToUser(req);
+  const statsBase = db.select().from(quizzesTable);
+  const all = await (scope ? statsBase.where(scope) : statsBase).orderBy(quizzesTable.createdAt);
   const totalQuizzes = all.length;
   const totalQuestions = all.reduce((s, q) => s + (q.questionCount ?? 0), 0);
   const postedToTelegram = all.filter((q) => q.postedToTelegram).length;
@@ -301,6 +320,20 @@ router.post("/quizzes", async (req, res) => {
   if (!content.trim() && !imageBase64) {
     res.status(400).json({ error: "Please provide text content or an image." });
     return;
+  }
+
+  const currentUser = req.user!;
+  if (currentUser.quizLimit > 0) {
+    const [{ used }] = await db
+      .select({ used: sql<number>`count(*)::int` })
+      .from(quizzesTable)
+      .where(eq(quizzesTable.userId, currentUser.id));
+    if ((used ?? 0) >= currentUser.quizLimit) {
+      res.status(403).json({
+        error: `You have reached your quiz limit (${currentUser.quizLimit}). Contact the administrator.`,
+      });
+      return;
+    }
   }
 
   try {
@@ -371,6 +404,7 @@ router.post("/quizzes", async (req, res) => {
     const [quiz] = await db
       .insert(quizzesTable)
       .values({
+        userId: currentUser.id,
         title: quizTitle,
         sourceContent: content,
         questions: allQuestions,
@@ -415,7 +449,7 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
 
   const count = Math.max(1, Math.min(50, Number(additionalCount) || 5));
 
-  const [quiz] = await db.select().from(quizzesTable).where(eq(quizzesTable.id, idNum));
+  const [quiz] = await db.select().from(quizzesTable).where(withScope(req, eq(quizzesTable.id, idNum)));
   if (!quiz) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -470,7 +504,7 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
     const [updated] = await db
       .update(quizzesTable)
       .set({ questions: merged, questionCount: merged.length, updatedAt: new Date() })
-      .where(eq(quizzesTable.id, idNum))
+      .where(withScope(req, eq(quizzesTable.id, idNum)))
       .returning();
 
     res.json({ ...formatQuiz(updated), addedCount: newQuestions.length });
@@ -487,7 +521,7 @@ router.get("/quizzes/:id", async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  const [quiz] = await db.select().from(quizzesTable).where(eq(quizzesTable.id, parsed.data.id));
+  const [quiz] = await db.select().from(quizzesTable).where(withScope(req, eq(quizzesTable.id, parsed.data.id)));
   if (!quiz) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -518,7 +552,11 @@ router.put("/quizzes/:id", async (req, res) => {
     updates.questionCount = normalizedQuestions.length;
   }
 
-  const [quiz] = await db.update(quizzesTable).set(updates).where(eq(quizzesTable.id, paramsParsed.data.id)).returning();
+  const [quiz] = await db
+    .update(quizzesTable)
+    .set(updates)
+    .where(withScope(req, eq(quizzesTable.id, paramsParsed.data.id)))
+    .returning();
   if (!quiz) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -532,7 +570,7 @@ router.delete("/quizzes/:id", async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  await db.delete(quizzesTable).where(eq(quizzesTable.id, parsed.data.id));
+  await db.delete(quizzesTable).where(withScope(req, eq(quizzesTable.id, parsed.data.id)));
   res.status(204).send();
 });
 
@@ -545,7 +583,7 @@ router.post("/quizzes/:id/mark-posted", async (req, res) => {
   const { channelId } = req.body as { channelId?: string };
   await db.update(quizzesTable)
     .set({ postedToTelegram: true, telegramChannel: channelId ?? null, updatedAt: new Date() })
-    .where(eq(quizzesTable.id, parsed.data.id));
+    .where(withScope(req, eq(quizzesTable.id, parsed.data.id)));
   res.json({ success: true });
 });
 
@@ -562,7 +600,7 @@ router.post("/quizzes/:id/post-to-telegram", async (req, res) => {
     return;
   }
 
-  const [quiz] = await db.select().from(quizzesTable).where(eq(quizzesTable.id, paramsParsed.data.id));
+  const [quiz] = await db.select().from(quizzesTable).where(withScope(req, eq(quizzesTable.id, paramsParsed.data.id)));
   if (!quiz) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -600,7 +638,7 @@ router.post("/quizzes/:id/post-to-telegram", async (req, res) => {
 
   await db.update(quizzesTable)
     .set({ postedToTelegram: true, telegramChannel: channelId, updatedAt: new Date() })
-    .where(eq(quizzesTable.id, paramsParsed.data.id));
+    .where(withScope(req, eq(quizzesTable.id, paramsParsed.data.id)));
 
   res.json({ success: true, postedCount: messageIds.length, messageIds });
 });
@@ -618,7 +656,7 @@ router.get("/quizzes/:id/export", async (req, res) => {
     return;
   }
 
-  const [quiz] = await db.select().from(quizzesTable).where(eq(quizzesTable.id, paramsParsed.data.id));
+  const [quiz] = await db.select().from(quizzesTable).where(withScope(req, eq(quizzesTable.id, paramsParsed.data.id)));
   if (!quiz) {
     res.status(404).json({ error: "Not found" });
     return;
