@@ -608,14 +608,33 @@ export default function QuizDetail() {
 
       {/* ═══════════════════════════════ TELEGRAM DIALOG ════════════════════════ */}
       <Dialog open={showTg} onOpenChange={o => { setShowTg(o); if (!o) { setPostProgress(0); setPostingStatus(""); } }}>
-        <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-lg max-h-[92vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-[#0088cc] flex items-center justify-center"><Send className="w-3.5 h-3.5 text-white" /></div>
-              Telegram-এ পোস্ট করুন
+              <div className="w-7 h-7 rounded-full bg-[#0088cc] flex items-center justify-center shrink-0"><Send className="w-3.5 h-3.5 text-white" /></div>
+              <span className="min-w-0 truncate">Telegram-এ পোস্ট করুন</span>
             </DialogTitle>
             <DialogDescription className="sr-only">Telegram bot settings for posting quizzes</DialogDescription>
           </DialogHeader>
+
+          {resumeState && resumeState.nextIndex < questions.length && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 space-y-1">
+              <p className="font-semibold">⏸️ আগের পোস্টিং অসম্পূর্ণ</p>
+              <p>
+                {resumeState.nextIndex}টি প্রশ্ন ইতিমধ্যে {resumeState.channelId}-এ পোস্ট হয়েছে।
+                বাকি {questions.length - resumeState.nextIndex}টি প্রশ্ন {resumeState.nextIndex + 1} নম্বর থেকে পাঠানো যাবে।
+              </p>
+              {resumeState.error && <p className="opacity-80 break-words">কারণ: {resumeState.error}</p>}
+              <button
+                type="button"
+                onClick={() => { clearResume(numId); setResumeState(null); }}
+                className="underline underline-offset-2 hover:no-underline"
+              >
+                বাতিল করে শুরু থেকে পোস্ট করব
+              </button>
+            </div>
+          )}
+
 
           <Tabs defaultValue="bot">
             <TabsList className="w-full grid grid-cols-3 h-9">
