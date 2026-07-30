@@ -77,6 +77,20 @@ function normalizeQuestion(q: QuizQuestion): QuizQuestion | null {
   };
 }
 
+// Telegram poll hard limits: question 300, option 100, explanation 200 chars.
+// We stay safely below them so every generated quiz can always be posted.
+const MAX_QUESTION = 250;
+const MAX_OPTION = 90;
+const MAX_EXPLANATION = 180;
+
+function clip(text: string, max: number): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const stop = Math.max(cut.lastIndexOf("। "), cut.lastIndexOf(". "), cut.lastIndexOf(" "));
+  return (stop > max * 0.6 ? cut.slice(0, stop) : cut).trim().replace(/[,;:।.]+$/, "") + "…";
+}
+
 function sanitizeQuestion(q: QuizQuestion): QuizQuestion | null {
   const normalized = normalizeQuestion(q);
   if (!normalized) return null;
@@ -89,13 +103,22 @@ function sanitizeQuestion(q: QuizQuestion): QuizQuestion | null {
 
   if (hasLatexNoise(originalJoined)) return null;
 
+  const question = clip(plainTextify(normalized.question), MAX_QUESTION);
+  const options = normalized.options.map((o) => clip(plainTextify(o), MAX_OPTION));
+  if (!question || options.some((o) => !o)) return null;
+
+  const explanation = normalized.explanation
+    ? clip(plainTextify(normalized.explanation), MAX_EXPLANATION)
+    : undefined;
+
   return {
-    question: plainTextify(normalized.question),
-    options: normalized.options.map(plainTextify),
+    question,
+    options,
     correctOptionIndex: normalized.correctOptionIndex,
-    explanation: normalized.explanation ? plainTextify(normalized.explanation) : undefined,
+    explanation: explanation || undefined,
   };
 }
+
 
 function cleanQuestionsForStorage(questions: QuizQuestion[]): QuizQuestion[] {
   return questions
