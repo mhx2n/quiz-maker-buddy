@@ -256,6 +256,14 @@ async function markSuccess(key: ApiKeyRow) {
 
 const COOLDOWN_QUOTA_MS = 30 * 60 * 1000;
 const COOLDOWN_ERROR_MS = 2 * 60 * 1000;
+const COOLDOWN_TIMEOUT_MS = 15 * 1000;
+
+/** A network abort/timeout is transient — never punish the key for 2 minutes. */
+function isTimeoutError(err: Error): boolean {
+  const msg = `${err.name} ${err.message}`.toLowerCase();
+  return msg.includes("abort") || msg.includes("timeout") || msg.includes("etimedout") || msg.includes("fetch failed");
+}
+
 
 async function markFailure(key: ApiKeyRow, err: Error, quota: boolean) {
   await db
