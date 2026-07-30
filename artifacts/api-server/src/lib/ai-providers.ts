@@ -3,6 +3,8 @@ import { db, apiKeysTable, type ApiKeyRow } from "@workspace/db";
 import { reportError } from "./notify";
 import { getSettings } from "./settings";
 import { logger } from "./logger";
+import { freeFallbackChat } from "./ai-fallback";
+
 
 export type AIMessageContent =
   | string
