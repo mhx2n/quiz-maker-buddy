@@ -193,13 +193,20 @@ function maskKey(value: string) {
   return value.length > 10 ? `${value.slice(0, 6)}••••${value.slice(-4)}` : "••••";
 }
 
+function normalizeModel(value?: string | null) {
+  const model = value?.trim();
+  if (!model) return null;
+  if (["auto", "default", "provider-default"].includes(model.toLowerCase())) return null;
+  return model;
+}
+
 router.get("/admin/api-keys", async (_req, res) => {
   const rows = await db.select().from(apiKeysTable).orderBy(apiKeysTable.priority, apiKeysTable.id);
   res.json(
     rows.map((row) => ({
       ...row,
       apiKey: maskKey(row.apiKey),
-      model: row.model ?? providerDef(row.provider).defaultModel,
+      model: normalizeModel(row.model) ?? providerDef(row.provider).defaultModel,
     })),
   );
 });
@@ -226,13 +233,17 @@ router.post("/admin/api-keys", async (req, res) => {
       provider: parsed.data.provider,
       label: parsed.data.label ?? "",
       apiKey: parsed.data.apiKey,
-      model: parsed.data.model || null,
+        model: normalizeModel(parsed.data.model),
       baseUrl: parsed.data.baseUrl || null,
       priority: parsed.data.priority ?? 100,
       isActive: parsed.data.isActive ?? true,
     })
     .returning();
-  res.status(201).json({ ...row, apiKey: maskKey(row!.apiKey) });
+  if (!row) {
+    res.status(500).json({ error: "Could not save API key" });
+    return;
+  }
+  res.status(201).json({ ...row, apiKey: maskKey(row.apiKey) });
 });
 
 router.patch("/admin/api-keys/:id", async (req, res) => {
@@ -243,12 +254,16 @@ router.patch("/admin/api-keys/:id", async (req, res) => {
     return;
   }
   const updates: Record<string, unknown> = {};
-  for (const field of ["provider", "label", "model", "baseUrl", "priority", "isActive"] as const) {
+  for (const field of ["provider", "label", "baseUrl", "priority", "isActive"] as const) {
     if (parsed.data[field] !== undefined) updates[field] = parsed.data[field];
   }
+  if (parsed.data.model !== undefined) updates.model = normalizeModel(parsed.data.model);
   if (parsed.data.apiKey) updates.apiKey = parsed.data.apiKey;
-  // Re-enabling a key clears its cooldown so it is retried immediately.
-  if (parsed.data.isActive) {
+  const changedProviderConfig = ["provider", "model", "baseUrl", "apiKey"].some(
+    (field) => parsed.data[field as keyof typeof parsed.data] !== undefined,
+  );
+  // Re-enabling or fixing provider config clears cooldown so the key is retried immediately.
+  if (parsed.data.isActive || changedProviderConfig) {
     updates.cooldownUntil = null;
     updates.status = "unknown";
     updates.lastError = null;

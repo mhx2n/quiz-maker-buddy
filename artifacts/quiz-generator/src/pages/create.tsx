@@ -313,7 +313,7 @@ export default function CreateQuiz() {
                 <Label className="text-sm font-medium">প্রশ্নের সংখ্যা</Label>
                 <span className="text-2xl font-bold text-primary tabular-nums">{questionCount}</span>
               </div>
-              <Slider min={1} max={20} step={1} value={[questionCount]} onValueChange={([v]) => setQuestionCount(v)} className="w-full" />
+              <Slider min={1} max={50} step={1} value={[questionCount]} onValueChange={([v]) => setQuestionCount(v)} className="w-full" />
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>1</span>
                 <span>10</span>
