@@ -231,9 +231,9 @@ STRICT RULES:
 2. correctOptionIndex is 0-based (0=A, 1=B, 2=C, 3=D) — VERIFY THIS IS CORRECT before outputting
 3. The correct answer MUST be factually/scientifically accurate — double-check numerical answers
 4. All 3 wrong options must be plausible distractors (common misconceptions or close values), NOT random
-5. explanation must clearly explain WHY the correct answer is right and why others are wrong (in ${language})
+5. explanation must be SHORT but effective: 1 sentence, MAXIMUM ${MAX_EXPLANATION} characters (in ${language}). State only the key reason the correct answer is right. No option-by-option breakdown, no repetition of the question.
 6. Questions must test UNDERSTANDING, not just memory
-7. For numerical problems: show the correct calculated value in explanation
+7. For numerical problems: give only the final calculated value in the explanation
 8. NEVER make the correct option obviously different in length/style from wrong options
 9. Randomize the order of options for every question so the correct answer does not stay in the same position repeatedly
 10. Keep the correct answer factually accurate after randomization
@@ -242,6 +242,7 @@ STRICT RULES:
 13. Write all formulas in plain text only, like x^2, sqrt(x), pi, dx/dy.
 14. Every question must be directly answerable from the provided content.
 15. If the answer is uncertain, do not generate that question.
+16. LENGTH LIMITS (hard): question <= ${MAX_QUESTION} characters, each option <= ${MAX_OPTION} characters, explanation <= ${MAX_EXPLANATION} characters. Never exceed them.
 
 Return format:
 [{"question":"...","options":["A text","B text","C text","D text"],"correctOptionIndex":0,"explanation":"..."}]
@@ -250,12 +251,17 @@ ${existingCtx}`,
 
   const callMessages: AIMessage[] = [systemMsg, ...messages];
 
+  // Keep the output budget proportional to the batch so a single call stays
+  // fast enough to finish well inside the provider/hosting timeout.
+  const tokenBudget = Math.min(6000, Math.max(1200, count * 220 + 400));
+
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 6000,
+    max_completion_tokens: tokenBudget,
     temperature: 0.5,
     messages: callMessages,
   });
+
 
   const raw = response.choices[0]?.message?.content ?? "[]";
 
