@@ -259,6 +259,7 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
     } else {
       used = needed;
     }
+    if ((window as any).__pdfdbg) console.log('q', i, 'h', Math.round(h), 'used', Math.round(used), 'limit', limit, 'col', colIndex, 'page', pages.length);
   });
 
   return { host, pages };
