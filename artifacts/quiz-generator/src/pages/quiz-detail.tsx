@@ -794,9 +794,18 @@ export default function QuizDetail() {
             </div>
           )}
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setShowTg(false); setPostProgress(0); setPostingStatus(""); }}>বাতিল</Button>
-            <Button onClick={handlePost} disabled={!botToken || !channelId || postProgress > 0} className="bg-[#0088cc] hover:bg-[#0077b3] gap-2">
+          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => { setShowTg(false); setPostProgress(0); setPostingStatus(""); }}>বাতিল</Button>
+            {resumeState && resumeState.channelId === channelId && resumeState.nextIndex < questions.length && (
+              <Button
+                onClick={() => handlePost({ resume: true })}
+                disabled={!botToken || !channelId || postProgress > 0}
+                className="w-full sm:w-auto gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+              >
+                <RotateCcw className="w-4 h-4" /> {resumeState.nextIndex + 1} থেকে চালিয়ে যান
+              </Button>
+            )}
+            <Button onClick={() => handlePost()} disabled={!botToken || !channelId || postProgress > 0} className="w-full sm:w-auto bg-[#0088cc] hover:bg-[#0077b3] gap-2">
               {postProgress > 0 ? <><Loader2 className="w-4 h-4 animate-spin" /> পাঠানো হচ্ছে...</> : <><Send className="w-4 h-4" /> {questions.length}টি প্রশ্ন পোস্ট করুন</>}
             </Button>
           </DialogFooter>
