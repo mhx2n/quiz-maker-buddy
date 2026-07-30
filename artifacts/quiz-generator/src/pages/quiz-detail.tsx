@@ -27,7 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import {
   ArrowLeft, Send, Trash2, Check, X, Edit2, Loader2, FileText, FileJson,
-  Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles,
+  Bot, Hash, Clock, AlertCircle, Pencil, Save, Sparkles, ChevronDown, ChevronUp,
   Pin, Plus, Image, Bold, Italic, Trophy, Star, RotateCcw,
 } from "lucide-react";
 import {
