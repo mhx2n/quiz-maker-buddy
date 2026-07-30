@@ -9,6 +9,9 @@ import {
   requireAuth,
   toPublicUser,
 } from "../lib/auth";
+import { getSettings } from "../lib/settings";
+import { validateAccessCode, consumeAccessCode } from "../lib/access-codes";
+import { reportError, notifyGroup } from "../lib/notify";
 
 const router = Router();
 
@@ -16,11 +19,22 @@ const credentialsSchema = z.object({
   email: z.string().trim().email().max(255),
   password: z.string().min(6).max(200),
   name: z.string().trim().max(100).optional(),
+  accessCode: z.string().trim().max(60).optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().trim().email().max(255),
   password: z.string().min(1).max(200),
+});
+
+/** Tells the login screen whether an access code field is needed. */
+router.get("/auth/config", async (_req, res) => {
+  const settings = await getSettings();
+  const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable);
+  res.json({
+    requireAccessCode: settings.requireAccessCode && (count ?? 0) > 0,
+    firstRun: (count ?? 0) === 0,
+  });
 });
 
 router.post("/auth/register", async (req, res) => {
@@ -42,7 +56,20 @@ router.post("/auth/register", async (req, res) => {
     .select({ count: sql<number>`count(*)::int` })
     .from(usersTable);
   const adminEmail = process.env["ADMIN_EMAIL"]?.trim().toLowerCase();
-  const role = count === 0 || (adminEmail && adminEmail === email) ? "admin" : "user";
+  const isFirstUser = (count ?? 0) === 0;
+  const role = isFirstUser || (adminEmail && adminEmail === email) ? "admin" : "user";
+
+  // Every user (except the very first/owner account) needs a bot-issued code.
+  const settings = await getSettings();
+  let codeRow = null;
+  if (settings.requireAccessCode && !isFirstUser) {
+    const check = await validateAccessCode(parsed.data.accessCode ?? "");
+    if (!check.ok) {
+      res.status(403).json({ error: check.error });
+      return;
+    }
+    codeRow = check.row;
+  }
 
   const [user] = await db
     .insert(usersTable)
@@ -54,6 +81,12 @@ router.post("/auth/register", async (req, res) => {
       lastLoginAt: new Date(),
     })
     .returning();
+
+  if (codeRow) await consumeAccessCode(codeRow, user!.id);
+
+  void notifyGroup(
+    `🆕 <b>New user registered</b>\n${email}${codeRow ? `\ncode: <code>${codeRow.code}</code>` : ""}`,
+  );
 
   res.status(201).json({ token: signToken(user.id), user: toPublicUser(user) });
 });
@@ -79,6 +112,35 @@ router.post("/auth/login", async (req, res) => {
   await db.update(usersTable).set({ lastLoginAt: new Date() }).where(eq(usersTable.id, user.id));
 
   res.json({ token: signToken(user.id), user: toPublicUser(user) });
+});
+
+/** Dedicated admin entrance used by /secure-admin-login. Non-admins get the same generic error. */
+router.post("/auth/admin-login", async (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Email and password are required." });
+    return;
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const valid = user && verifyPassword(parsed.data.password, user.passwordHash);
+
+  if (!valid || user!.role !== "admin" || user!.isBlocked) {
+    void reportError({
+      source: "auth",
+      level: "warn",
+      message: "Failed admin login attempt",
+      context: { email, ip: req.ip, userAgent: req.headers["user-agent"] },
+    });
+    res.status(401).json({ error: "Invalid administrator credentials." });
+    return;
+  }
+
+  await db.update(usersTable).set({ lastLoginAt: new Date() }).where(eq(usersTable.id, user!.id));
+  void notifyGroup(`🔐 <b>Admin signed in</b>\n${email}\nIP: <code>${req.ip ?? "unknown"}</code>`);
+
+  res.json({ token: signToken(user!.id), user: toPublicUser(user!) });
 });
 
 router.get("/auth/me", requireAuth, async (req, res) => {
