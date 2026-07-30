@@ -429,8 +429,13 @@ router.post("/quizzes", async (req, res) => {
     }
 
     if (message.includes("All AI providers exhausted") || message.includes("rate-limited")) {
+      // Include the real provider response so the admin can see WHY it failed
+      // (bad model name, invalid key, token limit…) instead of a generic message.
+      const detail = message.replace(/^All AI providers exhausted[^.]*\.\s*/i, "").slice(0, 400);
       res.status(503).json({
-        error: "All AI keys are exhausted or rate-limited right now. Please try again later.",
+        error: detail
+          ? `AI provider error → ${detail}`
+          : "All AI keys are exhausted or rate-limited right now. Please try again later.",
       });
       return;
     }
