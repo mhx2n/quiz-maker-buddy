@@ -232,7 +232,7 @@ router.post("/admin/api-keys", async (req, res) => {
     .values({
       provider: parsed.data.provider,
       label: parsed.data.label ?? "",
-      apiKey: parsed.data.apiKey,
+        apiKey: parsed.data.apiKey,
         model: normalizeModel(parsed.data.model),
       baseUrl: parsed.data.baseUrl || null,
       priority: parsed.data.priority ?? 100,
