@@ -111,8 +111,8 @@ function styleSheet(t: ThemeVars, fs: number, wmOpacity: number): string {
 .meta{margin-top:5px;font-size:10px;opacity:.9;display:flex;gap:14px;flex-wrap:wrap}
 .rule{height:2px;background:${t.primary};opacity:.18;border-radius:2px;margin:10px 0 12px}
 .cols{flex:1;display:flex;gap:${COL_GAP}px;align-items:flex-start;overflow:hidden}
-.col{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px}
-.qb{border:1px solid ${t.qBorder};border-radius:8px;padding:8px 10px 9px;background:#fff}
+.col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:9px;align-self:flex-start}
+.qb{flex:0 0 auto;border:1px solid ${t.qBorder};border-radius:8px;padding:8px 10px 9px;background:#fff}
 .qh{display:flex;gap:7px;align-items:flex-start}
 .qn{font-size:${fs}px;font-weight:700;color:${t.primary};min-width:16px;font-family:'Noto Sans',Arial,sans-serif}
 .qt{flex:1;font-size:${fs}px;font-weight:600;line-height:1.5;word-break:break-word}
@@ -219,7 +219,9 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
   host.appendChild(page);
   pages.push(page);
 
+  const GAP = 9;
   let colIndex = 0;
+  let used = 0; // height already consumed by the current column
   let columns = Array.from(page.querySelectorAll(".col")) as HTMLElement[];
   let limit = (page.querySelector(".cols") as HTMLElement).clientHeight;
 
@@ -239,17 +241,23 @@ function buildPages(quiz: QuizData, opts: PdfOptions, mode: PdfContentMode, labe
 
     let col = columns[colIndex]!;
     col.appendChild(block);
+    const h = block.getBoundingClientRect().height;
+    const needed = used === 0 ? h : used + GAP + h;
 
-    const used = Math.max(col.scrollHeight, col.offsetHeight);
-    if (used > limit - 4 && col.children.length > 1) {
+    // Never let a question be cut in half — move it to the next column/page.
+    if (needed > limit && col.children.length > 1) {
       col.removeChild(block);
       if (colIndex + 1 < columns.length) {
         colIndex++;
       } else {
         nextPage();
       }
+      used = 0;
       col = columns[colIndex]!;
       col.appendChild(block);
+      used = block.getBoundingClientRect().height;
+    } else {
+      used = needed;
     }
   });
 
