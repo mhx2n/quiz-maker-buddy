@@ -41,6 +41,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { exportQuizAsPDF, defaultPdfOptions, type PdfOptions, type PdfTheme, type PdfContentMode } from "@/lib/pdf-export";
 import { exportQuizAsCSV, exportQuizAsJSON } from "@/lib/csv-export";
+import { formatMathText } from "@/lib/text-format";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface QuizQuestion {
@@ -307,13 +308,16 @@ export default function QuizDetail() {
       for (let i = 0; i < questions.length; i++) {
         setPostingStatus(`প্রশ্ন ${i + 1}/${questions.length} পাঠানো হচ্ছে...`);
         const q = questions[i];
-        const qText = questionPrefix ? `${questionPrefix}\n${q.question}` : q.question;
-        const expl = q.explanation ? (explanationSuffix ? `${q.explanation}\n${explanationSuffix}` : q.explanation) : undefined;
+        const qBody = formatMathText(q.question);
+        const qText = questionPrefix ? `${questionPrefix}\n${qBody}` : qBody;
+        const explBody = q.explanation ? formatMathText(q.explanation) : "";
+        // One blank line before the suffix so it never sticks to the explanation.
+        const expl = explBody ? (explanationSuffix ? `${explBody}\n\n${explanationSuffix}` : explBody) : undefined;
 
         const payload: Record<string, unknown> = {
           chat_id: channelId,
           question: qText.slice(0, 300),
-          options: q.options.map(o => o.slice(0, 100)),
+          options: q.options.map(o => formatMathText(o).slice(0, 100)),
           type: "quiz",
           correct_option_id: q.correctOptionIndex,
           explanation: expl?.slice(0, 200),
@@ -471,7 +475,7 @@ export default function QuizDetail() {
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight truncate">{quiz.title}</h1>
+              <h1 className="text-xl sm:text-3xl font-bold tracking-tight truncate min-w-0">{quiz.title}</h1>
               <button onClick={() => { setDraftTitle(quiz.title); setEditingTitle(true); }} className="text-muted-foreground hover:text-foreground shrink-0"><Edit2 className="w-4 h-4" /></button>
             </div>
           )}
@@ -482,7 +486,7 @@ export default function QuizDetail() {
             {quiz.postedToTelegram && <Badge variant="secondary" className="bg-[#0088cc]/10 text-[#0088cc] border-0"><Send className="w-3 h-3 mr-1" /> {quiz.telegramChannel ?? "Telegram"}</Badge>}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:shrink-0">
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsCSV({ title: quiz.title, questions: quiz.questions as QuizQuestion[] }); toast({ title: "✅ CSV ডাউনলোড হয়েছে" }); }}><FileText className="w-4 h-4 mr-1" /> CSV</Button>
           <Button variant="outline" size="sm" onClick={() => { exportQuizAsJSON({ id: quiz.id, title: quiz.title, questions: quiz.questions as QuizQuestion[], createdAt: quiz.createdAt, telegramChannel: quiz.telegramChannel }); toast({ title: "✅ JSON ডাউনলোড হয়েছে" }); }}><FileJson className="w-4 h-4 mr-1" /> JSON</Button>
           <Button variant="outline" size="sm" onClick={() => setShowPdf(true)}><Download className="w-4 h-4 mr-1" /> PDF</Button>
@@ -499,7 +503,7 @@ export default function QuizDetail() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
                   <span className="bg-primary/10 text-primary font-bold text-xs px-2 py-1 rounded-md shrink-0 mt-0.5 font-mono">Q{i + 1}</span>
-                  <CardTitle className="text-sm font-medium leading-relaxed">{q.question}</CardTitle>
+                  <CardTitle className="text-sm font-medium leading-relaxed break-words">{formatMathText(q.question)}</CardTitle>
                 </div>
                 <div className="flex items-center gap-1 shrink-0 mt-0.5">
                   <button onClick={e => { e.stopPropagation(); setEditingQ(i); setDraftQuestion(q.question); setDraftOptions([...q.options]); setDraftCorrect(q.correctOptionIndex); setDraftExplanation(q.explanation ?? ""); setExpandedQ(i); }} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
@@ -539,12 +543,12 @@ export default function QuizDetail() {
                       {q.options.map((opt, j) => (
                         <div key={j} className={`flex items-center gap-2.5 p-3 rounded-xl text-sm border transition-all ${j === q.correctOptionIndex ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-semibold" : "bg-muted/30 border-border/40"}`}>
                           <span className={`font-bold text-xs w-6 h-6 flex items-center justify-center rounded-lg shrink-0 ${j === q.correctOptionIndex ? "bg-emerald-500 text-white" : "bg-muted-foreground/15 text-muted-foreground"}`}>{String.fromCharCode(65 + j)}</span>
-                          <span className="flex-1">{opt}</span>
+                          <span className="flex-1 break-words">{formatMathText(opt)}</span>
                           {j === q.correctOptionIndex && <Check className="w-3.5 h-3.5 ml-auto text-emerald-600 shrink-0" />}
                         </div>
                       ))}
                     </div>
-                    {q.explanation && <div className="border-l-2 border-primary/50 pl-3 py-1 text-sm text-muted-foreground bg-primary/5 rounded-r-lg"><span className="font-semibold text-foreground">💡 ব্যাখ্যা: </span>{q.explanation}</div>}
+                    {q.explanation && <div className="border-l-2 border-primary/50 pl-3 py-1 text-sm text-muted-foreground bg-primary/5 rounded-r-lg"><span className="font-semibold text-foreground">💡 ব্যাখ্যা: </span>{formatMathText(q.explanation)}</div>}
                   </>
                 )}
               </CardContent>
@@ -562,7 +566,7 @@ export default function QuizDetail() {
 
       {/* ═══════════════════════════════ TELEGRAM DIALOG ════════════════════════ */}
       <Dialog open={showTg} onOpenChange={o => { setShowTg(o); if (!o) { setPostProgress(0); setPostingStatus(""); } }}>
-        <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-lg max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-[#0088cc] flex items-center justify-center"><Send className="w-3.5 h-3.5 text-white" /></div>
@@ -862,7 +866,7 @@ export default function QuizDetail() {
             <div className="space-y-2">
               <Label className="text-sm font-medium">কতটি প্রশ্ন যোগ করবেন?</Label>
               <div className="flex items-center gap-3">
-                <Input type="number" min={1} max={10} value={moreCount} onChange={e => setMoreCount(Math.max(1, Math.min(10, parseInt(e.target.value)||5)))} className="w-24" />
+                <Input type="number" min={1} max={100} value={moreCount} onChange={e => setMoreCount(Math.max(1, Math.min(100, parseInt(e.target.value)||5)))} className="w-24" />
                 <span className="text-sm text-muted-foreground">টি (সর্বোচ্চ ১০)</span>
               </div>
             </div>
