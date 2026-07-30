@@ -1,5 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation } from "wouter";
+import { apiUrl } from "@/lib/api-base";
+import { getToken } from "@/lib/auth-api";
+
+/** JSON headers + bearer token for the authenticated quiz endpoints. */
+const authHeaders = (): Record<string, string> => {
+  const t = getToken();
+  return { "Content-Type": "application/json", ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+};
+
 import {
   useGetQuiz, useUpdateQuiz, useDeleteQuiz, useValidateTelegramBot,
   getGetQuizQueryKey, getListQuizzesQueryKey, getGetQuizStatsQueryKey,
