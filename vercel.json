@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "buildCommand": "pnpm install && pnpm --filter @workspace/quiz-generator run build",
+  "outputDirectory": "artifacts/quiz-generator/dist/public",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://telegram-quiz-creator-p1mx.onrender.com/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" }
+      ]
+    }
+  ]
+}

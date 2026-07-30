@@ -1,0 +1,383 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: quizzes
+    description: Quiz generation and management
+  - name: telegram
+    description: Telegram bot operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /quizzes:
+    get:
+      operationId: listQuizzes
+      tags: [quizzes]
+      summary: List all generated quizzes
+      responses:
+        "200":
+          description: List of quizzes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Quiz"
+    post:
+      operationId: generateQuiz
+      tags: [quizzes]
+      summary: Generate a quiz from content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateQuizBody"
+      responses:
+        "201":
+          description: Generated quiz
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quiz"
+
+  /quizzes/{id}:
+    get:
+      operationId: getQuiz
+      tags: [quizzes]
+      summary: Get a specific quiz
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Quiz details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quiz"
+        "404":
+          description: Not found
+    put:
+      operationId: updateQuiz
+      tags: [quizzes]
+      summary: Update a quiz
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQuizBody"
+      responses:
+        "200":
+          description: Updated quiz
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quiz"
+    delete:
+      operationId: deleteQuiz
+      tags: [quizzes]
+      summary: Delete a quiz
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /quizzes/{id}/post-to-telegram:
+    post:
+      operationId: postQuizToTelegram
+      tags: [telegram]
+      summary: Post a quiz to a Telegram channel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostToTelegramBody"
+      responses:
+        "200":
+          description: Posted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramPostResult"
+
+  /quizzes/{id}/export:
+    get:
+      operationId: exportQuiz
+      tags: [quizzes]
+      summary: Export quiz as CSV or JSON
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [csv, json]
+      responses:
+        "200":
+          description: Exported file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportResult"
+
+  /quizzes/stats:
+    get:
+      operationId: getQuizStats
+      tags: [quizzes]
+      summary: Get quiz statistics summary
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizStats"
+
+  /telegram/validate-bot:
+    post:
+      operationId: validateTelegramBot
+      tags: [telegram]
+      summary: Validate a Telegram bot token and get bot info
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateBotBody"
+      responses:
+        "200":
+          description: Bot info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotInfo"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    QuizQuestion:
+      type: object
+      properties:
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+          minItems: 2
+          maxItems: 10
+        correctOptionIndex:
+          type: integer
+        explanation:
+          type: string
+      required:
+        - question
+        - options
+        - correctOptionIndex
+
+    Quiz:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        sourceContent:
+          type: string
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizQuestion"
+        questionCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        postedToTelegram:
+          type: boolean
+        telegramChannel:
+          type: string
+          nullable: true
+      required:
+        - id
+        - title
+        - sourceContent
+        - questions
+        - questionCount
+        - createdAt
+        - updatedAt
+        - postedToTelegram
+
+    GenerateQuizBody:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+          default: ""
+        imageBase64:
+          type: string
+          nullable: true
+        questionCount:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+        language:
+          type: string
+          default: "Bengali"
+
+    UpdateQuizBody:
+      type: object
+      properties:
+        title:
+          type: string
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizQuestion"
+
+    PostToTelegramBody:
+      type: object
+      properties:
+        botToken:
+          type: string
+        channelId:
+          type: string
+        questionIndex:
+          type: integer
+          nullable: true
+          description: If null, posts all questions
+      required:
+        - botToken
+        - channelId
+
+    TelegramPostResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        postedCount:
+          type: integer
+        messageIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - success
+        - postedCount
+        - messageIds
+
+    ExportResult:
+      type: object
+      properties:
+        data:
+          type: string
+        filename:
+          type: string
+        format:
+          type: string
+      required:
+        - data
+        - filename
+        - format
+
+    QuizStats:
+      type: object
+      properties:
+        totalQuizzes:
+          type: integer
+        totalQuestions:
+          type: integer
+        postedToTelegram:
+          type: integer
+        recentQuizzes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Quiz"
+      required:
+        - totalQuizzes
+        - totalQuestions
+        - postedToTelegram
+        - recentQuizzes
+
+    ValidateBotBody:
+      type: object
+      properties:
+        botToken:
+          type: string
+      required:
+        - botToken
+
+    BotInfo:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        username:
+          type: string
+          nullable: true
+        firstName:
+          type: string
+          nullable: true
+      required:
+        - valid

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Telegram Quiz Generator"
+version = "1.0.0"
+id = "artifacts/quiz-generator"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18590
+
+[services.development]
+run = "pnpm --filter @workspace/quiz-generator run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/quiz-generator", "run", "build" ]
+publicDir = "artifacts/quiz-generator/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18590"
+BASE_PATH = "/"

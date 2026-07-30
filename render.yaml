@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: telegram-quiz-api
+    env: node
+    plan: free
+    rootDir: .
+    buildCommand: pnpm install && pnpm --filter @workspace/api-server run build
+    startCommand: node --enable-source-maps ./artifacts/api-server/dist/index.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false   # paste your Neon connection string here
+      - key: GROQ_API_KEY
+        sync: false   # free from https://console.groq.com
