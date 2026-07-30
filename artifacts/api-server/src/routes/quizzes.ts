@@ -14,6 +14,8 @@ import {
   ExportQuizQueryParams,
 } from "@workspace/api-zod";
 import { aiClient as openai, AI_MODEL, AI_SUPPORTS_VISION, type AIMessage } from "../lib/ai";
+import { getSettings } from "../lib/settings";
+import { telegramCall, reportError } from "../lib/notify";
 
 const router = Router();
 
@@ -453,7 +455,7 @@ router.post("/quizzes/:id/add-questions", async (req, res) => {
     category?: string;
   };
 
-  const count = Math.max(1, Math.min(50, Number(additionalCount) || 5));
+  const count = Math.max(1, Math.min(1000, Number(additionalCount) || 5));
 
   const [quiz] = await db.select().from(quizzesTable).where(withScope(req, eq(quizzesTable.id, idNum)));
   if (!quiz) {
@@ -600,7 +602,21 @@ router.post("/quizzes/:id/post-to-telegram", async (req, res) => {
     return;
   }
 
-  const bodyParsed = PostQuizToTelegramBody.safeParse(req.body);
+  // Users may bring their own bot; otherwise the platform bot/channel is used.
+  const settings = await getSettings();
+  const body = req.body as Record<string, unknown>;
+  const merged = {
+    ...body,
+    botToken: String(body.botToken ?? "").trim() || settings.defaultBotToken,
+    channelId: String(body.channelId ?? "").trim() || settings.defaultChannelId,
+  };
+
+  if (!merged.botToken || !merged.channelId) {
+    res.status(400).json({ error: "A bot token and a channel ID are required." });
+    return;
+  }
+
+  const bodyParsed = PostQuizToTelegramBody.safeParse(merged);
   if (!bodyParsed.success) {
     res.status(400).json({ error: bodyParsed.error.message });
     return;
@@ -613,40 +629,75 @@ router.post("/quizzes/:id/post-to-telegram", async (req, res) => {
   }
 
   const { botToken, channelId, questionIndex } = bodyParsed.data;
-  const questions = quiz.questions as QuizQuestion[];
+  const questions = toRenderableQuestions((quiz.questions ?? []) as QuizQuestion[]);
   const toPost = questionIndex != null ? [questions[questionIndex]].filter(Boolean) : questions;
 
   const messageIds: number[] = [];
-  for (const q of toPost) {
+  const failures: Array<{ index: number; error: string }> = [];
+
+  // Telegram allows ~20 messages/minute per chat — post steadily and retry
+  // on flood-wait so an unlimited number of questions can be published.
+  for (let i = 0; i < toPost.length; i++) {
+    const q = toPost[i]!;
     const payload = {
       chat_id: channelId,
-      question: plainTextify(q.question),
-      options: q.options.map((o) => plainTextify(o)),
+      question: plainTextify(q.question).slice(0, 300),
+      options: q.options.map((o) => plainTextify(o).slice(0, 100)),
       type: "quiz",
       correct_option_id: q.correctOptionIndex,
-      explanation: q.explanation ? plainTextify(q.explanation) : undefined,
+      explanation: q.explanation ? plainTextify(q.explanation).slice(0, 200) : undefined,
       is_anonymous: true,
     };
 
-    const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPoll`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await resp.json()) as { ok: boolean; result?: { message_id: number } };
-    if (!data.ok) {
-      res.status(400).json({ error: `Telegram error: ${JSON.stringify(data)}` });
-      return;
+    let posted = false;
+    for (let attempt = 0; attempt < 3 && !posted; attempt++) {
+      const data = await telegramCall<{ message_id: number }>(botToken, "sendPoll", payload, 20000);
+      if (data.ok && data.result) {
+        messageIds.push(data.result.message_id);
+        posted = true;
+        break;
+      }
+      const description = data.description ?? "unknown error";
+      const retryAfter = /retry after (\d+)/i.exec(description)?.[1];
+      if (retryAfter) {
+        await new Promise((r) => setTimeout(r, (Number(retryAfter) + 1) * 1000));
+        continue;
+      }
+      if (attempt === 2) {
+        failures.push({ index: i, error: description });
+        await reportError({
+          source: "telegram",
+          level: "warn",
+          message: `Telegram post failed: ${description}`,
+          userId: req.user?.id ?? null,
+          context: { quizId: quiz.id, channelId, questionIndex: i },
+        });
+      } else {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
-    if (data.result) messageIds.push(data.result.message_id);
+
+    if (i < toPost.length - 1) await new Promise((r) => setTimeout(r, 1200));
+  }
+
+  if (!messageIds.length) {
+    res.status(400).json({
+      error: `Telegram rejected every question. ${failures[0]?.error ?? "Check the bot token, channel ID, and that the bot is an admin in the channel."}`,
+    });
+    return;
   }
 
   await db.update(quizzesTable)
     .set({ postedToTelegram: true, telegramChannel: channelId, updatedAt: new Date() })
     .where(withScope(req, eq(quizzesTable.id, paramsParsed.data.id)));
 
-  res.json({ success: true, postedCount: messageIds.length, messageIds });
+  res.json({
+    success: true,
+    postedCount: messageIds.length,
+    messageIds,
+    failedCount: failures.length,
+    failures: failures.slice(0, 5),
+  });
 });
 
 router.get("/quizzes/:id/export", async (req, res) => {
